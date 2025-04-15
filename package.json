@@ -1,0 +1,128 @@
+{
+  "name": "lgd-helper",
+  "displayName": "lgd-helper",
+  "description": "tools for lgd",
+  "version": "0.0.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mimundoapp9/lgd-helper.git"
+  },
+  "publisher": "mimundoapp9",
+  "engines": {
+    "vscode": "^1.87.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "lgdSidebar",
+          "title": "LGD",
+          "icon": "media/lgd-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "lgdSidebar": [
+        {
+          "type": "webview",
+          "id": "lgdView",
+          "name": "LGD Tools",
+          "icon": "media/lgd-icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "lgd-helper.startVM",
+        "title": "✨ Iniciar Máquina Virtual LGD"
+      },
+      {
+        "command": "lgd-helper.stopVM",
+        "title": "🛑 Detener Máquina Virtual LGD"
+      },
+      {
+        "command": "lgd-helper.showLogs",
+        "title": "📋 Ver logs del contenedor"
+      },
+      {
+        "command": "lgd-helper.listPorts",
+        "title": "🔗 Listar puertos"
+      },
+      {
+        "command": "lgd-helper.showDatabases",
+        "title": "💾 Gestionar bases de datos"
+      },
+      {
+        "command": "lgd-helper.checkStatus",
+        "title": "🔍 Verificar Estado de VM LGD"
+      },
+      {
+        "command": "lgd-helper.showDebugLogs",
+        "title": "🔍 Mostrar Logs de Depuración LGD"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "lgd-helper.startVM",
+          "group": "navigation"
+        },
+        {
+          "command": "lgd-helper.stopVM",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "lgd-helper.startVM"
+        },
+        {
+          "command": "lgd-helper.stopVM"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "lgd-helper.showDebugLogs",
+        "key": "ctrl+shift+alt+d",
+        "mac": "cmd+shift+alt+d"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run package",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "watch:esbuild": "node esbuild.js --watch",
+    "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
+    "package": "node esbuild.js --production",
+    "compile-tests": "tsc -p . --outDir out",
+    "watch-tests": "tsc -p . -w --outDir out",
+    "pretest": "npm run compile-tests && npm run compile && npm run lint",
+    "check-types": "tsc --noEmit",
+    "lint": "eslint src --ext ts",
+    "test": "vscode-test",
+    "dev": "npm run compile && cursor --install-extension lgd-helper-0.0.1.vsix"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.87.0",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^8.56.0",
+    "esbuild": "^0.25.1",
+    "npm-run-all": "^4.1.5",
+    "typescript": "^5.3.3",
+    "@vscode/test-cli": "^0.0.10",
+    "@vscode/test-electron": "^2.4.1",
+    "esbuild-plugin-copy": "^2.1.1"
+  }
+}
