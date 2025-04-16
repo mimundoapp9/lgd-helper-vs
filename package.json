@@ -35,6 +35,10 @@
           "id": "lgdView",
           "name": "LGD Tools",
           "icon": "media/lgd-icon.svg"
+        },
+        {
+          "id": "priorityFolders",
+          "name": "Carpetas Prioritarias"
         }
       ]
     },
@@ -66,6 +70,19 @@
       {
         "command": "lgd-helper.showDebugLogs",
         "title": "🔍 Mostrar Logs de Depuración LGD"
+      },
+      {
+        "command": "lgd-helper.selectPriorityFolder",
+        "title": "📁 Seleccionar Carpeta Prioritaria"
+      },
+      {
+        "command": "lgd-helper.removePriorityFolder",
+        "title": "❌ Remover Carpeta Prioritaria",
+        "icon": "$(close)"
+      },
+      {
+        "command": "lgd-helper.createWorkspace",
+        "title": "🗂 Crear Workspace de Turbodega"
       }
     ],
     "menus": {
@@ -85,6 +102,13 @@
         },
         {
           "command": "lgd-helper.stopVM"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "lgd-helper.removePriorityFolder",
+          "when": "view == priorityFolders",
+          "group": "inline"
         }
       ]
     },
@@ -109,7 +133,8 @@
     "check-types": "tsc --noEmit",
     "lint": "eslint src --ext ts",
     "test": "vscode-test",
-    "dev": "npm run compile && cursor --install-extension lgd-helper-0.0.1.vsix"
+    "dev": "npm run compile && cursor --install-extension lgd-helper-0.0.1.vsix",
+    "start": "node src/cli.js"
   },
   "devDependencies": {
     "@types/vscode": "^1.87.0",

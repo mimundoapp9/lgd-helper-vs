@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import * as path from 'path';
+import * as fs from 'fs';
+import { PriorityFolderProvider } from './priorityFolderProvider';
 
 // Interfaz para los contenedores
 interface Container {
@@ -99,10 +101,114 @@ export function activate(context: vscode.ExtensionContext) {
       }),
       vscode.commands.registerCommand('lgd-helper.showDebugLogs', () => {
         showDebugLogs();
-      })
+      }),
+      vscode.commands.registerCommand('lgd-helper.selectPriorityFolder', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!workspaceRoot) {
+            vscode.window.showErrorMessage('No hay un workspace abierto');
+            return;
+        }
+
+        const devPath = path.join(workspaceRoot, 'dev');
+
+        try {
+            function findAllSubfolders(dir: string): string[] {
+                const results: string[] = [];
+                const items = fs.readdirSync(dir);
+
+                for (const item of items) {
+                    const fullPath = path.join(dir, item);
+                    if (fs.statSync(fullPath).isDirectory()) {
+                        const relativePath = path.relative(devPath, fullPath);
+                        // Solo incluir subcarpetas, no las carpetas de primer nivel
+                        if (relativePath.includes(path.sep)) {
+                            results.push(relativePath);
+                        }
+                        results.push(...findAllSubfolders(fullPath));
+                    }
+                }
+
+                return results;
+            }
+
+            const folders = findAllSubfolders(devPath);
+
+            const selected = await vscode.window.showQuickPick(folders, {
+                placeHolder: 'Selecciona una carpeta para hacerla prioritaria'
+            });
+
+            if (selected) {
+                const configPath = path.join(workspaceRoot, 'config.json');
+                let config = { priorityFolders: [], devPath: "./dev", lastSelectedFolder: null };
+
+                if (fs.existsSync(configPath)) {
+                    config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+                }
+
+                if (!config.priorityFolders.includes(selected)) {
+                    config.priorityFolders.push(selected);
+                }
+                config.lastSelectedFolder = selected;
+
+                fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+                vscode.window.showInformationMessage(`Carpeta "${selected}" establecida como prioritaria`);
+
+                priorityFolderProvider.refresh();
+            }
+        } catch (error) {
+            vscode.window.showErrorMessage('Error al acceder a la carpeta dev');
+        }
+    }),
+    vscode.commands.registerCommand('lgd-helper.removePriorityFolder', async (folder: PriorityFolder) => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!workspaceRoot) {
+            return;
+        }
+
+        const configPath = path.join(workspaceRoot, 'config.json');
+        if (fs.existsSync(configPath)) {
+            const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+            config.priorityFolders = config.priorityFolders.filter((f: string) => f !== folder.relativePath);
+            fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+
+            // Refrescar la vista
+            priorityFolderProvider.refresh();
+
+            vscode.window.showInformationMessage(`Carpeta "${folder.label}" removida de prioritarias`);
+        }
+    }),
+    vscode.commands.registerCommand('lgd-helper.createWorkspace', async () => {
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        if (!workspaceRoot) {
+            vscode.window.showErrorMessage('No hay un workspace abierto');
+            return;
+        }
+
+        const devPath = path.join(workspaceRoot, 'dev');
+
+        try {
+            const workspacePath = await createWorkspace(devPath);
+
+            // Abrir el workspace
+            const uri = vscode.Uri.file(workspacePath);
+            await vscode.commands.executeCommand('vscode.openFolder', uri);
+
+            vscode.window.showInformationMessage('Workspace creado exitosamente');
+        } catch (error) {
+            vscode.window.showErrorMessage('Error al crear el workspace');
+            console.error(error);
+        }
+    })
     ];
 
     context.subscriptions.push(...commands);
+
+    // Registrar el PriorityFolderProvider
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+    if (workspaceRoot) {
+        const priorityFolderProvider = new PriorityFolderProvider(workspaceRoot);
+        vscode.window.registerTreeDataProvider('priorityFolders', priorityFolderProvider);
+    }
 
     // Cargar puertos al inicio
     loadContainerPorts();
@@ -484,4 +590,72 @@ function showDebugLogs() {
   outputChannel.appendLine(`- VS Code versión: ${vscode.version}`);
   outputChannel.appendLine(`- Extensión versión: ${vscode.extensions.getExtension('mimundoapp9.lgd-helper')?.packageJSON.version}`);
   outputChannel.appendLine('='.repeat(50));
+}
+
+// Función para crear el workspace
+async function createWorkspace(devPath: string) {
+    const workspaceRoot = path.dirname(devPath);
+    const rootName = path.basename(workspaceRoot);
+    const parentPath = path.dirname(workspaceRoot); // Directorio padre del workspace actual
+
+    try {
+        // Obtener carpetas dentro de src
+        const srcPath = path.join(devPath, 'odoo', 'custom', 'src');
+        const srcFolders = fs.readdirSync(srcPath)
+            .filter(item => fs.statSync(path.join(srcPath, item)).isDirectory())
+            .map(folder => ({
+                path: path.join('odoo', 'custom', 'src', folder)
+            }));
+
+        // Obtener carpetas hermanas (otros repositorios al mismo nivel)
+        const siblingFolders = fs.readdirSync(parentPath)
+            .filter(item => {
+                const itemPath = path.join(parentPath, item);
+                return fs.statSync(itemPath).isDirectory() &&
+                       item !== rootName && // Excluir el directorio actual
+                       fs.existsSync(path.join(itemPath, 'dev')); // Verificar que sea un repo similar
+            })
+            .map(folder => ({
+                path: path.join('..', folder),
+                name: folder
+            }));
+
+        // Agregar la carpeta de la máquina virtual si existe
+        const vmFolders = [];
+        const vmPath = '/home/algoritmia/AllBackup/cdms/SERVER0002'; // Tu path a la VM
+        if (fs.existsSync(vmPath)) {
+            vmFolders.push({
+                path: vmPath,
+                name: "VM-LGD"
+            });
+        }
+
+        const workspaceContent = {
+            folders: [
+                // Carpeta raíz primero
+                {
+                    path: ".",
+                    name: rootName
+                },
+                // Carpetas de src
+                ...srcFolders,
+                // Carpetas hermanas (otros repos)
+                ...siblingFolders,
+                // Carpeta de la VM
+                ...vmFolders
+            ],
+            settings: {
+                "search.followSymlinks": false,
+                "esbonio.sphinx.confDir": ""
+            }
+        };
+
+        const workspacePath = path.join(devPath, `${rootName}.code-workspace`);
+        fs.writeFileSync(workspacePath, JSON.stringify(workspaceContent, null, 2));
+
+        return workspacePath;
+    } catch (error) {
+        console.error('Error al crear workspace:', error);
+        throw error;
+    }
 }
