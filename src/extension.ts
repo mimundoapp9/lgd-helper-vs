@@ -14,9 +14,6 @@ interface Container {
 let outputChannel: vscode.OutputChannel;
 let isDebugging = false; // Flag para modo debug
 
-// Constante para el directorio de vagrant
-const VAGRANT_DIR = '/home/algoritmia/AllBackup/cdms/SERVER0002';
-
 // Al inicio del archivo, después de las interfaces
 let containerPorts: Map<string, string[]> = new Map();
 
@@ -214,17 +211,28 @@ export function activate(context: vscode.ExtensionContext) {
     loadContainerPorts();
 }
 
+// Reemplazar la constante VAGRANT_DIR con una función
+function getVagrantDir(): string {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+    if (!workspaceRoot) {
+        return ''; // O manejar el error como prefieras
+    }
+    return path.join(workspaceRoot, '..', '..'); // Subir dos niveles (cd ../../)
+}
+
+// Modificar las funciones que usan VAGRANT_DIR
 function executeVagrantCommand(command: string, message: string) {
-  debugLog(`Ejecutando vagrant ${command} en ${VAGRANT_DIR}`);
+    const vagrantDir = getVagrantDir();
+    debugLog(`Ejecutando vagrant ${command} en ${vagrantDir}`);
 
-  const terminal = vscode.window.createTerminal({
-    name: "LGD – VM",
-    cwd: VAGRANT_DIR // Especificar el directorio de trabajo
-  });
+    const terminal = vscode.window.createTerminal({
+        name: "LGD – VM",
+        cwd: vagrantDir
+    });
 
-  terminal.show();
-  terminal.sendText(`vagrant ${command}`);
-  vscode.window.showInformationMessage(message);
+    terminal.show();
+    terminal.sendText(`vagrant ${command}`);
+    vscode.window.showInformationMessage(message);
 }
 
 class LGDViewProvider implements vscode.WebviewViewProvider {
@@ -373,12 +381,13 @@ export function deactivate() {}
 
 // Función modificada para ejecutar comandos
 async function executeCommand(command: string): Promise<string> {
-    debugLog(`Ejecutando comando: ${command} en directorio: ${VAGRANT_DIR}`);
+    const vagrantDir = getVagrantDir();
+    debugLog(`Ejecutando comando: ${command} en directorio: ${vagrantDir}`);
     return new Promise((resolve, reject) => {
         exec(command, {
             encoding: 'utf8',
             maxBuffer: 1024 * 1024,
-            cwd: VAGRANT_DIR // Especificar el directorio de trabajo
+            cwd: vagrantDir
         }, (error, stdout, stderr) => {
             if (error) {
                 debugLog(`Error en comando: ${error.message}`);
@@ -454,13 +463,13 @@ async function showContainerLogs() {
   }
   const terminal = vscode.window.createTerminal('LGD Logs');
   terminal.show();
-  terminal.sendText('vagrant ssh -c "docker logs -f lgdoo --tail 300"');
+  terminal.sendText('cd ../../;vagrant ssh -c "docker logs -f lgdoo --tail 300"');
 }
 
 // Función para cargar los puertos
 async function loadContainerPorts() {
     try {
-        const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}|{{.Image}}|{{.Ports}}\'"');
+        const output = await executeCommand(' "docker ps --format \'{{.Names}}|{{.Image}}|{{.Ports}}\'"');
         const containers = output.split('\n').filter(line => line.trim());
 
         containerPorts.clear();
@@ -486,7 +495,7 @@ async function listContainerPorts() {
 
         const terminal = vscode.window.createTerminal({
             name: 'LGD Ports',
-            cwd: VAGRANT_DIR,
+            cwd: getVagrantDir(),
             hideFromUser: true // Ocultar el comando
         });
 
@@ -534,7 +543,7 @@ async function showDatabases() {
     return;
   }
   try {
-    const output = await executeCommand('vagrant ssh -c "docker exec ldb psql -U odoo -l"');
+    const output = await executeCommand('cd ../../;vagrant ssh -c "docker exec ldb psql -U odoo -l"');
     const databases = parseDatabases(output);
     showDatabaseList(databases);
   } catch (error) {
@@ -572,8 +581,8 @@ async function deleteDatabase(dbName: string) {
     return;
   }
   try {
-    await executeCommand(`vagrant ssh -c "docker stop ${dbName}"`);
-    await executeCommand(`vagrant ssh -c "docker exec ldb dropdb -U odoo --if-exists ${dbName}"`);
+    await executeCommand(`cd ../../;vagrant ssh -c "docker stop ${dbName}"`);
+    await executeCommand(`cd ../../;vagrant ssh -c "docker exec ldb dropdb -U odoo --if-exists ${dbName}"`);
     vscode.window.showInformationMessage(`Base de datos ${dbName} eliminada`);
   } catch (error) {
     vscode.window.showErrorMessage(`Error al eliminar base de datos: ${error}`);
@@ -622,7 +631,7 @@ async function createWorkspace(devPath: string) {
 
         // Agregar la carpeta de la máquina virtual si existe
         const vmFolders = [];
-        const vmPath = '/home/algoritmia/AllBackup/cdms/SERVER0002'; // Tu path a la VM
+        const vmPath = getVagrantDir(); // Tu path a la VM
         if (fs.existsSync(vmPath)) {
             vmFolders.push({
                 path: vmPath,

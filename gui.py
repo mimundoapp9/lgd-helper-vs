@@ -35,7 +35,7 @@ def create_vscode_config(repo_path, output_box):
                 {
                     "label": "🚀 Iniciar Contenedor Odoo",
                     "type": "shell",
-                    "command": f"vagrant ssh -c 'docker start {container_name} && docker logs -f {container_name}'",
+                    "command": f"cd ../../;vagrant ssh -c 'docker start {container_name} && docker logs -f {container_name}'",
                     "presentation": {
                         "reveal": "always",
                         "panel": "dedicated",
@@ -48,7 +48,7 @@ def create_vscode_config(repo_path, output_box):
                 {
                     "label": "🔁 Reiniciar Contenedor Odoo",
                     "type": "shell",
-                    "command": f"vagrant ssh -c 'docker restart {container_name} && docker logs -f {container_name}'",
+                    "command": f"cd ../../;vagrant ssh -c 'docker restart {container_name} && docker logs -f {container_name}'",
                     "presentation": {
                         "reveal": "always",
                         "panel": "dedicated",
@@ -61,7 +61,7 @@ def create_vscode_config(repo_path, output_box):
                 {
                     "label": "⏹️ Detener Contenedor Odoo",
                     "type": "shell",
-                    "command": f"vagrant ssh -c 'docker stop {container_name} && echo \"Contenedor detenido\"'",
+                    "command": f"cd ../../;vagrant ssh -c 'docker stop {container_name} && echo \"Contenedor detenido\"'",
                     "presentation": {
                         "reveal": "always",
                         "panel": "dedicated",
@@ -349,7 +349,7 @@ def show_databases(output_box):
     def task():
         try:
             # Comando modificado para listar las bases de datos
-            command = "vagrant ssh -c 'docker exec ldb psql -U odoo -l'"
+            command = "cd ../../;vagrant ssh -c 'docker exec ldb psql -U odoo -l'"
 
             process = subprocess.Popen(
                 command,
@@ -427,7 +427,7 @@ def delete_selected_database(db_name, output_box):
         try:
             # Primero detenemos el contenedor que usa la base de datos
             output_box.insert(tk.END, f"🛑 Deteniendo contenedor '{db_name}'...\n")
-            stop_command = f"vagrant ssh -c 'docker stop {db_name}'"
+            stop_command = f"cd ../../;vagrant ssh -c 'docker stop {db_name}'"
             output_box.insert(tk.END, f"Ejecutando: {stop_command}\n")
 
             process = subprocess.Popen(
@@ -445,7 +445,7 @@ def delete_selected_database(db_name, output_box):
             # Ahora sí eliminamos la base de datos
             output_box.insert(tk.END, "🗑️ Eliminando base de datos anterior...\n")
             drop_command = (
-                f"vagrant ssh -c 'docker exec ldb dropdb -U odoo --if-exists {db_name}'"
+                f"cd ../../;vagrant ssh -c 'docker exec ldb dropdb -U odoo --if-exists {db_name}'"
             )
             output_box.insert(tk.END, f"Ejecutando: {drop_command}\n")
 
@@ -637,12 +637,12 @@ def restore_database(output_box):
 
                 # Detener el contenedor si existe
                 output_box.insert(tk.END, f"🛑 Deteniendo contenedor '{db_name}'...\n")
-                stop_command = f"vagrant ssh -c 'docker stop {db_name}'"
+                stop_command = f"cd ../../;vagrant ssh -c 'docker stop {db_name}'"
                 subprocess.run(stop_command, shell=True)
 
                 # Eliminar base de datos si existe
                 output_box.insert(tk.END, "🗑️ Eliminando base de datos anterior...\n")
-                drop_command = f"vagrant ssh -c 'docker exec ldb dropdb -U odoo --if-exists {db_name}'"
+                drop_command = f"cd ../../;vagrant ssh -c 'docker exec ldb dropdb -U odoo --if-exists {db_name}'"
                 output_box.insert(tk.END, f"Ejecutando: {drop_command}\n")
                 process = subprocess.Popen(
                     drop_command,
@@ -658,7 +658,7 @@ def restore_database(output_box):
                 # Crear nueva base de datos
                 output_box.insert(tk.END, "🆕 Creando nueva base de datos...\n")
                 create_command = (
-                    f"vagrant ssh -c 'docker exec ldb createdb -U odoo {db_name}'"
+                    f"cd ../../;vagrant ssh -c 'docker exec ldb createdb -U odoo {db_name}'"
                 )
                 output_box.insert(tk.END, f"Ejecutando: {create_command}\n")
                 process = subprocess.Popen(
@@ -676,7 +676,7 @@ def restore_database(output_box):
                 output_box.insert(tk.END, "📥 Restaurando datos...\n")
 
                 # Primero copiamos el dump al contenedor
-                copy_to_container = f"vagrant ssh -c 'docker cp /home/vagrant/dev/temp/dump.sql ldb:/tmp/dump.sql'"
+                copy_to_container = f"cd ../../;vagrant ssh -c 'docker cp /home/vagrant/dev/temp/dump.sql ldb:/tmp/dump.sql'"
                 output_box.insert(
                     tk.END, f"Copiando dump al contenedor: {copy_to_container}\n"
                 )
@@ -693,7 +693,7 @@ def restore_database(output_box):
 
                 # Ahora restauramos usando la ruta dentro del contenedor
                 restore_command = (
-                    f"vagrant ssh -c 'docker exec ldb "
+                    f"cd ../../;vagrant ssh -c 'docker exec ldb "
                     f"psql -U odoo -f /tmp/dump.sql {db_name}'"
                 )
                 output_box.insert(tk.END, f"Ejecutando: {restore_command}\n")
@@ -724,7 +724,7 @@ def restore_database(output_box):
                     )
 
                     # Primero eliminamos el filestore existente en la máquina virtual
-                    delete_command = f"vagrant ssh -c 'sudo rm -rf {vm_filestore_path}'"
+                    delete_command = f"cd ../../;vagrant ssh -c 'sudo rm -rf {vm_filestore_path}'"
                     output_box.insert(
                         tk.END, f"Eliminando filestore existente: {delete_command}\n"
                     )
@@ -741,7 +741,7 @@ def restore_database(output_box):
 
                     # Mover el nuevo filestore a la máquina virtual
                     move_filestore = (
-                        f"vagrant ssh -c 'sudo mv "
+                        f"cd ../../;vagrant ssh -c 'sudo mv "
                         f"/home/vagrant/dev/temp/filestore {vm_filestore_path}'"
                     )
                     output_box.insert(
