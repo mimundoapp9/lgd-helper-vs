@@ -15,7 +15,7 @@ let outputChannel: vscode.OutputChannel;
 let isDebugging = false; // Flag para modo debug
 
 // Constante para el directorio de vagrant
-const VAGRANT_DIR = '/home/algoritmia/AllBackup/cdms/SERVER0002';
+const VAGRANT_DIR = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath.replace(/\/dev$/, '') || process.cwd();
 
 // Al inicio del archivo, después de las interfaces
 let containerPorts: Map<string, string[]> = new Map();
