@@ -20,6 +20,17 @@ const VAGRANT_DIR = '/home/algoritmia/AllBackup/cdms/SERVER0002';
 // Al inicio del archivo, después de las interfaces
 let containerPorts: Map<string, string[]> = new Map();
 
+// Primero definimos una interfaz para el tipo de configuración
+interface WorkspaceConfig {
+    folders: Array<{
+        path: string;
+        name?: string;
+    }>;
+    settings: {
+        [key: string]: any;
+    };
+}
+
 // Función helper para logging que solo funciona en modo debug
 function debugLog(message: string) {
     if (isDebugging && outputChannel) {
@@ -185,6 +196,10 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         const devPath = path.join(workspaceRoot, 'dev');
+        if (!fs.existsSync(devPath)) {
+            vscode.window.showErrorMessage('No se encuentra la carpeta dev');
+            return;
+        }
 
         try {
             const workspacePath = await createWorkspace(devPath);
@@ -593,64 +608,93 @@ function showDebugLogs() {
 }
 
 // Función para crear el workspace
-async function createWorkspace(devPath: string) {
-    const workspaceRoot = path.dirname(devPath);
-    const rootName = path.basename(workspaceRoot);
-    const parentPath = path.dirname(workspaceRoot); // Directorio padre del workspace actual
-
+async function createWorkspace(devPath: string): Promise<string> {
     try {
-        // Obtener carpetas dentro de src
-        const srcPath = path.join(devPath, 'odoo', 'custom', 'src');
-        const srcFolders = fs.readdirSync(srcPath)
-            .filter(item => fs.statSync(path.join(srcPath, item)).isDirectory())
+        const workspaceRoot = path.dirname(devPath);
+        const rootName = path.basename(workspaceRoot);
+
+        // Obtener archivos y carpetas de dev
+        const devItems = fs.readdirSync(devPath).map(item => ({
+            fullPath: path.join(devPath, item),
+            name: item,
+            isDirectory: fs.statSync(path.join(devPath, item)).isDirectory()
+        }));
+
+        // Obtener archivos de la raíz (vm)
+        const rootItems = fs.readdirSync(workspaceRoot).map(item => ({
+            fullPath: path.join(workspaceRoot, item),
+            name: item,
+            isDirectory: fs.statSync(path.join(workspaceRoot, item)).isDirectory()
+        }));
+
+        // Separar carpetas y archivos
+        const devFolders = devItems
+            .filter(item => item.isDirectory)
             .map(folder => ({
-                path: path.join('odoo', 'custom', 'src', folder)
+                path: path.join('dev', folder.name),
+                name: folder.name
             }));
 
-        // Obtener carpetas hermanas (otros repositorios al mismo nivel)
-        const siblingFolders = fs.readdirSync(parentPath)
-            .filter(item => {
-                const itemPath = path.join(parentPath, item);
-                return fs.statSync(itemPath).isDirectory() &&
-                       item !== rootName && // Excluir el directorio actual
-                       fs.existsSync(path.join(itemPath, 'dev')); // Verificar que sea un repo similar
-            })
-            .map(folder => ({
-                path: path.join('..', folder),
-                name: folder
-            }));
-
-        // Agregar la carpeta de la máquina virtual si existe
-        const vmFolders = [];
-        const vmPath = '/home/algoritmia/AllBackup/cdms/SERVER0002'; // Tu path a la VM
-        if (fs.existsSync(vmPath)) {
-            vmFolders.push({
-                path: vmPath,
-                name: "VM-LGD"
-            });
-        }
-
-        const workspaceContent = {
+        const workspaceContent: WorkspaceConfig = {
             folders: [
-                // Carpeta raíz primero
+                // Carpeta dev como raíz
+                {
+                    path: "dev",
+                    name: "dev"
+                },
+                // Todas las carpetas dentro de dev
+                ...devFolders,
+                // Carpeta especial para archivos de dev
+                {
+                    path: "dev",
+                    name: "📄 Archivos dev"
+                },
+                // Carpeta para archivos de la raíz
                 {
                     path: ".",
-                    name: rootName
-                },
-                // Carpetas de src
-                ...srcFolders,
-                // Carpetas hermanas (otros repos)
-                ...siblingFolders,
-                // Carpeta de la VM
-                ...vmFolders
+                    name: "📄 Archivos vm"
+                }
             ],
             settings: {
                 "search.followSymlinks": false,
-                "esbonio.sphinx.confDir": ""
+                "esbonio.sphinx.confDir": "",
+                // Configuraciones para mostrar/ocultar archivos
+                "files.exclude": {
+                    // Ocultar carpetas en la vista de archivos dev
+                    ...devFolders.reduce((acc, folder) => ({
+                        ...acc,
+                        [`dev/${folder.name}`]: true
+                    }), {}),
+                    // Ocultar carpetas en la vista de archivos vm
+                    ...rootItems
+                        .filter(item => item.isDirectory && item.name !== 'dev')
+                        .reduce((acc, folder) => ({
+                            ...acc,
+                            [folder.name]: true
+                        }), {})
+                },
+                // Configuraciones específicas para cada vista
+                [`files.exclude.${rootName}/dev`]: {
+                    "**/": false,
+                    ...devFolders.reduce((acc, folder) => ({
+                        ...acc,
+                        [folder.name]: true
+                    }), {})
+                },
+                [`files.exclude.${rootName}`]: {
+                    "**/": false,
+                    "dev": true,
+                    ...rootItems
+                        .filter(item => item.isDirectory)
+                        .reduce((acc, folder) => ({
+                            ...acc,
+                            [folder.name]: true
+                        }), {})
+                }
             }
         };
 
-        const workspacePath = path.join(devPath, `${rootName}.code-workspace`);
+        const workspacePath = path.join(workspaceRoot, `${rootName}.code-workspace`);
         fs.writeFileSync(workspacePath, JSON.stringify(workspaceContent, null, 2));
 
         return workspacePath;
