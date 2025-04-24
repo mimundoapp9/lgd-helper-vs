@@ -2,7 +2,6 @@ import * as vscode from 'vscode';
 import { exec } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
-import { PriorityFolderProvider } from './priorityFolderProvider';
 
 // Interfaz para los contenedores
 interface Container {
@@ -453,7 +452,6 @@ export function activate(context: vscode.ExtensionContext) {
                 fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
                 vscode.window.showInformationMessage(`Carpeta "${selected}" establecida como prioritaria`);
 
-                priorityFolderProvider.refresh();
             }
         } catch (error) {
             vscode.window.showErrorMessage('Error al acceder a la carpeta dev');
@@ -472,7 +470,6 @@ export function activate(context: vscode.ExtensionContext) {
             fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 
             // Refrescar la vista
-            priorityFolderProvider.refresh();
 
             vscode.window.showInformationMessage(`Carpeta "${folder.label}" removida de prioritarias`);
         }
@@ -509,12 +506,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     context.subscriptions.push(...commands);
 
-    // Registrar el PriorityFolderProvider
-    const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
-    if (workspaceRoot) {
-        const priorityFolderProvider = new PriorityFolderProvider(workspaceRoot);
-        vscode.window.registerTreeDataProvider('priorityFolders', priorityFolderProvider);
-    }
+    
 
     // Registrar el proveedor de contenedores
     dockerContainersProvider = new DockerContainersProvider();

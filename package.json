@@ -37,10 +37,6 @@
           "icon": "media/lgd-icon.svg"
         },
         {
-          "id": "priorityFolders",
-          "name": "Carpetas Prioritarias"
-        },
-        {
           "id": "dockerContainers",
           "name": "Contenedores Docker"
         }
