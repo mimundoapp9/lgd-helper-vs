@@ -40,6 +40,292 @@ function debugLog(message: string) {
     }
 }
 
+// Primero, definimos la clase para el proveedor de la vista de árbol de contenedores
+class DockerContainersProvider implements vscode.TreeDataProvider<ContainerItem> {
+  private _onDidChangeTreeData: vscode.EventEmitter<ContainerItem | undefined | null | void> = new vscode.EventEmitter<ContainerItem | undefined | null | void>();
+  readonly onDidChangeTreeData: vscode.Event<ContainerItem | undefined | null | void> = this._onDidChangeTreeData.event;
+
+  constructor() {
+    // Refrescar contenedores cada 30 segundos
+    setInterval(() => {
+      this.refresh();
+    }, 30000);
+  }
+
+  refresh(): void {
+    this._onDidChangeTreeData.fire();
+  }
+
+  getTreeItem(element: ContainerItem): vscode.TreeItem {
+    return element;
+  }
+
+  async getChildren(element?: ContainerItem): Promise<ContainerItem[]> {
+    if (element) {
+      return []; // No hay hijos para los elementos individuales
+    }
+
+    try {
+      // Verificar si la VM está corriendo
+      const isRunning = await checkVagrantStatus();
+      if (!isRunning) {
+        return [new ContainerItem('La máquina virtual no está corriendo', 'vm-stopped', vscode.TreeItemCollapsibleState.None)];
+      }
+
+      // Obtener lista de contenedores
+      const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}\'"');
+      const containers = output.split('\n').filter(line => line.trim());
+
+      if (containers.length === 0) {
+        return [new ContainerItem('No hay contenedores en ejecución', 'no-containers', vscode.TreeItemCollapsibleState.None)];
+      }
+
+      return containers.map(container => {
+        const [name, image, status, ports] = container.split('|');
+        
+        // Extraer puertos mapeados
+        const portMappings: {external: string, internal: string}[] = [];
+        const portRegex = /0\.0\.0\.0:(\d+)->(\d+)\/tcp/g;
+        let match;
+        
+        while ((match = portRegex.exec(ports)) !== null) {
+          portMappings.push({
+            external: match[1],
+            internal: match[2]
+          });
+        }
+        
+        // Crear descripción con puertos
+        let description = status;
+        if (portMappings.length > 0) {
+          const portInfo = portMappings.map(p => `${p.internal}→${p.external}`).join(', ');
+          description += ` | Puertos: ${portInfo}`;
+        }
+        
+        return new ContainerItem(
+          name.trim(),
+          'container',
+          vscode.TreeItemCollapsibleState.None,
+          {
+            title: "Acciones",
+            command: "lgd-helper.showContainerActions",
+            arguments: [name.trim()]
+          },
+          description,
+          image
+        );
+      });
+    } catch (error) {
+      debugLog(`Error al obtener contenedores: ${error}`);
+      return [new ContainerItem(`Error: ${error}`, 'error', vscode.TreeItemCollapsibleState.None)];
+    }
+  }
+}
+
+// Clase para representar un elemento de contenedor en el árbol
+class ContainerItem extends vscode.TreeItem {
+  constructor(
+    public readonly label: string,
+    public readonly contextValue: string,
+    public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+    public readonly command?: vscode.Command,
+    public readonly description?: string,
+    public readonly tooltip?: string
+  ) {
+    super(label, collapsibleState);
+    this.tooltip = tooltip || label;
+    this.description = description;
+    this.contextValue = contextValue;
+    
+    // Asignar icono según el tipo
+    if (contextValue === 'container') {
+      this.iconPath = new vscode.ThemeIcon('server');
+    } else if (contextValue === 'vm-stopped') {
+      this.iconPath = new vscode.ThemeIcon('debug-disconnect');
+    } else if (contextValue === 'error') {
+      this.iconPath = new vscode.ThemeIcon('error');
+    } else if (contextValue === 'no-containers') {
+      this.iconPath = new vscode.ThemeIcon('info');
+    }
+  }
+}
+
+// Función para mostrar acciones disponibles para un contenedor
+async function showContainerActions(containerName: string) {
+  const actions = [
+    'Ver logs',
+    'Reiniciar contenedor',
+    'Abrir en navegador',
+    'Copiar nombre'
+  ];
+
+  const selectedAction = await vscode.window.showQuickPick(actions, {
+    placeHolder: `Selecciona una acción para ${containerName}`
+  });
+
+  if (!selectedAction) {
+    return; // Usuario canceló
+  }
+
+  switch (selectedAction) {
+    case 'Ver logs':
+      showContainerLogsById(containerName);
+      break;
+    case 'Reiniciar contenedor':
+      restartContainerById(containerName);
+      break;
+    case 'Abrir en navegador':
+      openContainerInBrowser(containerName);
+      break;
+    case 'Copiar nombre':
+      vscode.env.clipboard.writeText(containerName);
+      vscode.window.showInformationMessage(`Nombre del contenedor copiado: ${containerName}`);
+      break;
+  }
+}
+
+// Función para ver logs de un contenedor específico
+async function showContainerLogsById(containerName: string) {
+  if (!(await ensureVagrantRunning())) {
+    return;
+  }
+
+  try {
+    // Opciones para los logs
+    const logOptions = [
+      'Ver últimos 100 logs',
+      'Ver últimos 300 logs',
+      'Ver logs en tiempo real (seguimiento)',
+      'Ver logs con timestamps'
+    ];
+
+    const selectedOption = await vscode.window.showQuickPick(logOptions, {
+      placeHolder: `Opciones de logs para ${containerName}`
+    });
+
+    if (!selectedOption) {
+      return; // Usuario canceló
+    }
+
+    // Crear terminal para mostrar logs
+    const terminal = vscode.window.createTerminal(`Logs: ${containerName}`);
+    terminal.show();
+
+    // Ejecutar comando según la opción seleccionada
+    let command = '';
+    switch (selectedOption) {
+      case 'Ver últimos 100 logs':
+        command = `docker logs ${containerName} --tail 100`;
+        break;
+      case 'Ver últimos 300 logs':
+        command = `docker logs ${containerName} --tail 300`;
+        break;
+      case 'Ver logs en tiempo real (seguimiento)':
+        command = `docker logs -f ${containerName} --tail 50`;
+        break;
+      case 'Ver logs con timestamps':
+        command = `docker logs ${containerName} --tail 100 -t`;
+        break;
+    }
+
+    terminal.sendText(`vagrant ssh -c "${command}"`);
+  } catch (error) {
+    debugLog(`Error al mostrar logs: ${error}`);
+    vscode.window.showErrorMessage(`Error al mostrar logs: ${error}`);
+  }
+}
+
+// Función para reiniciar un contenedor específico
+async function restartContainerById(containerName: string) {
+  if (!(await ensureVagrantRunning())) {
+    return;
+  }
+
+  try {
+    // Confirmar reinicio
+    const confirmRestart = await vscode.window.showWarningMessage(
+      `¿Estás seguro de que deseas reiniciar el contenedor "${containerName}"?`,
+      'Sí, reiniciar', 'Cancelar'
+    );
+
+    if (confirmRestart !== 'Sí, reiniciar') {
+      return;
+    }
+
+    // Mostrar mensaje de información
+    vscode.window.showInformationMessage(`Reiniciando contenedor ${containerName}...`);
+    
+    // Ejecutar comando de reinicio
+    await executeCommand(`vagrant ssh -c "docker restart ${containerName}"`);
+    
+    // Mostrar mensaje de éxito
+    vscode.window.showInformationMessage(`✅ Contenedor ${containerName} reiniciado correctamente`);
+    
+    // Refrescar la vista de contenedores
+    dockerContainersProvider.refresh();
+  } catch (error) {
+    debugLog(`Error al reiniciar contenedor: ${error}`);
+    vscode.window.showErrorMessage(`Error al reiniciar contenedor: ${error}`);
+  }
+}
+
+// Función para abrir un contenedor en el navegador
+async function openContainerInBrowser(containerName: string) {
+  if (!(await ensureVagrantRunning())) {
+    return;
+  }
+
+  try {
+    // Obtener puertos del contenedor
+    const output = await executeCommand(`vagrant ssh -c "docker ps --format '{{.Ports}}' --filter name=${containerName}"`);
+    const portRegex = /0\.0\.0\.0:(\d+)->(\d+)\/tcp/g;
+    const ports: {external: string, internal: string}[] = [];
+    
+    let match;
+    while ((match = portRegex.exec(output)) !== null) {
+      ports.push({
+        external: match[1],
+        internal: match[2]
+      });
+    }
+
+    if (ports.length === 0) {
+      vscode.window.showInformationMessage(`El contenedor ${containerName} no tiene puertos expuestos.`);
+      return;
+    }
+
+    if (ports.length === 1) {
+      // Si solo hay un puerto, abrirlo directamente
+      const url = `http://192.168.56.10:${ports[0].external}`;
+      vscode.env.openExternal(vscode.Uri.parse(url));
+      return;
+    }
+
+    // Si hay múltiples puertos, mostrar opciones
+    const portOptions = ports.map(p => `Puerto ${p.internal} (externo: ${p.external})`);
+    
+    const selectedPort = await vscode.window.showQuickPick(portOptions, {
+      placeHolder: 'Selecciona un puerto para abrir en el navegador'
+    });
+
+    if (!selectedPort) {
+      return; // Usuario canceló
+    }
+
+    // Extraer el puerto externo seleccionado
+    const selectedIndex = portOptions.indexOf(selectedPort);
+    const url = `http://192.168.56.10:${ports[selectedIndex].external}`;
+    
+    vscode.env.openExternal(vscode.Uri.parse(url));
+  } catch (error) {
+    debugLog(`Error al abrir en navegador: ${error}`);
+    vscode.window.showErrorMessage(`Error al abrir en navegador: ${error}`);
+  }
+}
+
+// Variable global para el proveedor de contenedores
+let dockerContainersProvider: DockerContainersProvider;
+
 export function activate(context: vscode.ExtensionContext) {
     // Crear el canal de output siempre
     outputChannel = vscode.window.createOutputChannel('LGD Helper Debug');
@@ -229,6 +515,18 @@ export function activate(context: vscode.ExtensionContext) {
         const priorityFolderProvider = new PriorityFolderProvider(workspaceRoot);
         vscode.window.registerTreeDataProvider('priorityFolders', priorityFolderProvider);
     }
+
+    // Registrar el proveedor de contenedores
+    dockerContainersProvider = new DockerContainersProvider();
+    context.subscriptions.push(
+      vscode.window.registerTreeDataProvider('dockerContainers', dockerContainersProvider)
+    );
+
+    // Registrar comandos relacionados con contenedores
+    context.subscriptions.push(
+      vscode.commands.registerCommand('lgd-helper.refreshContainers', () => dockerContainersProvider.refresh()),
+      vscode.commands.registerCommand('lgd-helper.showContainerActions', showContainerActions)
+    );
 }
 
 function executeVagrantCommand(command: string, message: string) {
@@ -296,6 +594,9 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'showLogs':
           showContainerLogs();
+          break;
+        case 'restartContainer':
+          restartContainer();
           break;
         case 'listPorts':
           listContainerPorts();
@@ -439,7 +740,8 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
 
           <div class="section">
             <h3>🐳 Contenedores</h3>
-            <button onclick="showLogs()">📋 Ver logs del contenedor</button>
+            <button onclick="showLogs()">📋 Ver logs de contenedores</button>
+            <button onclick="restartContainer()">🔄 Reiniciar contenedor</button>
             <button onclick="listPorts()">🔗 Listar puertos</button>
           </div>
 
@@ -461,6 +763,10 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
 
             function showLogs() {
               vscode.postMessage({ command: 'showLogs' });
+            }
+
+            function restartContainer() {
+              vscode.postMessage({ command: 'restartContainer' });
             }
 
             function listPorts() {
@@ -570,12 +876,87 @@ async function ensureVagrantRunning(): Promise<boolean> {
 
 // Modificar las funciones existentes para usar la verificación
 async function showContainerLogs() {
+  debugLog('Iniciando función showContainerLogs');
+  
   if (!(await ensureVagrantRunning())) {
+    debugLog('La máquina virtual no está corriendo');
     return;
   }
-  const terminal = vscode.window.createTerminal('LGD Logs');
-  terminal.show();
-  terminal.sendText('vagrant ssh -c "docker logs -f lgdoo --tail 300"');
+
+  try {
+    debugLog('Obteniendo lista de contenedores');
+    // Obtener lista de contenedores
+    const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}\'"');
+    const containers = output.split('\n').filter(line => line.trim());
+    debugLog(`Contenedores encontrados: ${containers.join(', ')}`);
+
+    if (containers.length === 0) {
+      vscode.window.showInformationMessage('No hay contenedores en ejecución');
+      return;
+    }
+
+    // Mostrar quickpick para seleccionar contenedor
+    debugLog('Mostrando selector de contenedores');
+    const selectedContainer = await vscode.window.showQuickPick(containers, {
+      placeHolder: 'Selecciona un contenedor para ver sus logs'
+    });
+
+    if (!selectedContainer) {
+      debugLog('Usuario canceló la selección de contenedor');
+      return; // Usuario canceló
+    }
+    
+    debugLog(`Contenedor seleccionado: ${selectedContainer}`);
+
+    // Opciones para los logs
+    const logOptions = [
+      'Ver últimos 100 logs',
+      'Ver últimos 300 logs',
+      'Ver logs en tiempo real (seguimiento)',
+      'Ver logs con timestamps'
+    ];
+
+    debugLog('Mostrando opciones de logs');
+    const selectedOption = await vscode.window.showQuickPick(logOptions, {
+      placeHolder: `Opciones de logs para ${selectedContainer}`
+    });
+
+    if (!selectedOption) {
+      debugLog('Usuario canceló la selección de opciones');
+      return; // Usuario canceló
+    }
+    
+    debugLog(`Opción seleccionada: ${selectedOption}`);
+
+    // Crear terminal para mostrar logs
+    debugLog('Creando terminal para logs');
+    const terminal = vscode.window.createTerminal(`Logs: ${selectedContainer}`);
+    terminal.show();
+
+    // Ejecutar comando según la opción seleccionada
+    let command = '';
+    switch (selectedOption) {
+      case 'Ver últimos 100 logs':
+        command = `docker logs ${selectedContainer} --tail 100`;
+        break;
+      case 'Ver últimos 300 logs':
+        command = `docker logs ${selectedContainer} --tail 300`;
+        break;
+      case 'Ver logs en tiempo real (seguimiento)':
+        command = `docker logs -f ${selectedContainer} --tail 50`;
+        break;
+      case 'Ver logs con timestamps':
+        command = `docker logs ${selectedContainer} --tail 100 -t`;
+        break;
+    }
+
+    debugLog(`Ejecutando comando: vagrant ssh -c "${command}"`);
+    terminal.sendText(`vagrant ssh -c "${command}"`);
+
+  } catch (error) {
+    debugLog(`Error al mostrar logs: ${error}`);
+    vscode.window.showErrorMessage(`Error al mostrar logs: ${error}`);
+  }
 }
 
 // Función para cargar los puertos
@@ -630,35 +1011,118 @@ async function listContainerPorts() {
             }
         });
 
-        const terminal = vscode.window.createTerminal({
-            name: 'LGD Ports',
-            cwd: VAGRANT_DIR,
-            hideFromUser: true
-        });
+        // Crear un panel de información en lugar de una terminal
+        const panel = vscode.window.createWebviewPanel(
+            'lgdPorts',
+            'LGD Puertos',
+            vscode.ViewColumn.One,
+            {
+                enableScripts: true
+            }
+        );
 
-        // Construir el comando completo
-        const command = [
-            'clear',
-            'echo "🔗 Enlaces disponibles:"',
-            'echo ""',
-            'echo "Seguir vínculo (ctrl + clic)"',
-            'echo ""'
-        ];
-
-        // Añadir los enlaces con nombre del contenedor y puerto interno
+        // Construir el HTML para el panel
+        let portListHtml = '';
         containerPortMappings.forEach((mappings, containerName) => {
             mappings.forEach(mapping => {
-                const portInfo = `(${mapping.internal})`;
-                const formattedName = `${containerName} ${portInfo}`.padEnd(40, ' ');
-                command.push(`echo "${formattedName} ➜ http://192.168.56.10:${mapping.external}"`);
+                const url = `http://192.168.56.10:${mapping.external}`;
+                portListHtml += `
+                <div class="port-item">
+                    <div class="container-name">${containerName} <span class="port-badge">${mapping.internal}</span></div>
+                    <a href="${url}" class="port-link">${url}</a>
+                </div>`;
             });
         });
 
-        command.push('echo ""');
-        command.push('echo "✅ Listado completado."');
+        panel.webview.html = `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>LGD Puertos</title>
+            <style>
+                body {
+                    font-family: var(--vscode-font-family);
+                    padding: 1rem;
+                    color: var(--vscode-foreground);
+                    background-color: var(--vscode-editor-background);
+                }
+                h1 {
+                    font-size: 1.5rem;
+                    margin-bottom: 1rem;
+                    border-bottom: 1px solid var(--vscode-panel-border);
+                    padding-bottom: 0.5rem;
+                }
+                .port-list {
+                    display: flex;
+                    flex-direction: column;
+                    gap: 0.8rem;
+                }
+                .port-item {
+                    padding: 0.8rem;
+                    border: 1px solid var(--vscode-panel-border);
+                    border-radius: 4px;
+                    background-color: var(--vscode-editor-background);
+                }
+                .container-name {
+                    font-weight: bold;
+                    margin-bottom: 0.3rem;
+                }
+                .port-badge {
+                    background-color: var(--vscode-badge-background);
+                    color: var(--vscode-badge-foreground);
+                    padding: 0.1rem 0.4rem;
+                    border-radius: 10px;
+                    font-size: 0.8rem;
+                    margin-left: 0.5rem;
+                }
+                .port-link {
+                    color: var(--vscode-textLink-foreground);
+                    text-decoration: none;
+                }
+                .port-link:hover {
+                    text-decoration: underline;
+                }
+                .refresh-button {
+                    margin-top: 1rem;
+                    padding: 0.5rem 1rem;
+                    background-color: var(--vscode-button-background);
+                    color: var(--vscode-button-foreground);
+                    border: none;
+                    border-radius: 2px;
+                    cursor: pointer;
+                }
+                .refresh-button:hover {
+                    background-color: var(--vscode-button-hoverBackground);
+                }
+            </style>
+        </head>
+        <body>
+            <h1>🔗 Enlaces disponibles</h1>
+            <div class="port-list">
+                ${portListHtml}
+            </div>
+            <button class="refresh-button" onclick="refreshPorts()">🔄 Actualizar puertos</button>
+            
+            <script>
+                const vscode = acquireVsCodeApi();
+                
+                function refreshPorts() {
+                    vscode.postMessage({ command: 'refresh' });
+                }
+            </script>
+        </body>
+        </html>`;
 
-        terminal.show();
-        terminal.sendText(command.join(' && '), true);
+        // Manejar mensajes del webview
+        panel.webview.onDidReceiveMessage(
+            message => {
+                if (message.command === 'refresh') {
+                    listContainerPorts();
+                }
+            }
+        );
 
     } catch (error) {
         debugLog(`Error al listar puertos: ${error}`);
@@ -891,4 +1355,64 @@ async function validateWorkspaceStructure() {
             vscode.window.showErrorMessage('Esta extensión requiere un Vagrantfile en la raíz y una carpeta "dev". La estructura actual no es compatible.');
         }
     }
+}
+
+async function restartContainer() {
+  debugLog('Iniciando función restartContainer');
+  
+  if (!(await ensureVagrantRunning())) {
+    debugLog('La máquina virtual no está corriendo');
+    return;
+  }
+
+  try {
+    debugLog('Obteniendo lista de contenedores');
+    // Obtener lista de contenedores
+    const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}\'"');
+    const containers = output.split('\n').filter(line => line.trim());
+    debugLog(`Contenedores encontrados: ${containers.join(', ')}`);
+
+    if (containers.length === 0) {
+      vscode.window.showInformationMessage('No hay contenedores en ejecución');
+      return;
+    }
+
+    // Mostrar quickpick para seleccionar contenedor
+    debugLog('Mostrando selector de contenedores');
+    const selectedContainer = await vscode.window.showQuickPick(containers, {
+      placeHolder: 'Selecciona un contenedor para reiniciar'
+    });
+
+    if (!selectedContainer) {
+      debugLog('Usuario canceló la selección de contenedor');
+      return; // Usuario canceló
+    }
+    
+    debugLog(`Contenedor seleccionado: ${selectedContainer}`);
+
+    // Confirmar reinicio
+    const confirmRestart = await vscode.window.showWarningMessage(
+      `¿Estás seguro de que deseas reiniciar el contenedor "${selectedContainer}"?`,
+      'Sí, reiniciar', 'Cancelar'
+    );
+
+    if (confirmRestart !== 'Sí, reiniciar') {
+      debugLog('Usuario canceló el reinicio');
+      return;
+    }
+
+    // Mostrar mensaje de información
+    vscode.window.showInformationMessage(`Reiniciando contenedor ${selectedContainer}...`);
+    
+    // Ejecutar comando de reinicio
+    debugLog(`Ejecutando comando de reinicio para ${selectedContainer}`);
+    await executeCommand(`vagrant ssh -c "docker restart ${selectedContainer}"`);
+    
+    // Mostrar mensaje de éxito
+    vscode.window.showInformationMessage(`✅ Contenedor ${selectedContainer} reiniciado correctamente`);
+
+  } catch (error) {
+    debugLog(`Error al reiniciar contenedor: ${error}`);
+    vscode.window.showErrorMessage(`Error al reiniciar contenedor: ${error}`);
+  }
 }
