@@ -35,6 +35,11 @@
           "id": "lgdView",
           "name": "LGD Tools",
           "icon": "media/lgd-icon.svg"
+        },
+        {
+          "id": "lgdDockerContainers",
+          "name": "Contenedores Docker",
+          "icon": "media/docker-icon.svg"
         }
       ]
     },

@@ -23,6 +23,131 @@ interface WorkspaceConfig {
     };
 }
 
+// Interfaces
+interface Container {
+    name: string;
+    image: string;
+    ports: string[];
+}
+
+// Clase para representar un elemento de contenedor en el árbol
+class ContainerItem extends vscode.TreeItem {
+    constructor(
+        public readonly label: string,
+        public readonly contextValue: string,
+        public readonly collapsibleState: vscode.TreeItemCollapsibleState,
+        public readonly command?: vscode.Command,
+        public readonly description?: string,
+        public readonly tooltip?: string
+    ) {
+        super(label, collapsibleState);
+        this.tooltip = tooltip || label;
+        this.description = description;
+        this.contextValue = contextValue;
+
+        // Asignar icono según el tipo
+        if (contextValue === 'container') {
+            this.iconPath = new vscode.ThemeIcon('server');
+        } else if (contextValue === 'vm-stopped') {
+            this.iconPath = new vscode.ThemeIcon('debug-disconnect');
+        } else if (contextValue === 'error') {
+            this.iconPath = new vscode.ThemeIcon('error');
+        } else if (contextValue === 'no-containers') {
+            this.iconPath = new vscode.ThemeIcon('info');
+        }
+    }
+}
+
+// Proveedor de la vista de árbol de contenedores
+class DockerContainersProvider implements vscode.TreeDataProvider<ContainerItem> {
+    private _onDidChangeTreeData: vscode.EventEmitter<ContainerItem | undefined | null | void> = new vscode.EventEmitter<ContainerItem | undefined | null | void>();
+    readonly onDidChangeTreeData: vscode.Event<ContainerItem | undefined | null | void> = this._onDidChangeTreeData.event;
+
+    constructor() {
+        // Refrescar contenedores cada 30 segundos
+        setInterval(() => {
+            this.refresh();
+        }, 30000);
+    }
+
+    refresh(): void {
+        this._onDidChangeTreeData.fire();
+    }
+
+    getTreeItem(element: ContainerItem): vscode.TreeItem {
+        return element;
+    }
+
+    async getChildren(element?: ContainerItem): Promise<ContainerItem[]> {
+        if (element) {
+            return []; // No hay hijos para los elementos individuales
+        }
+
+        try {
+            // Verificar si la VM está corriendo
+            const isRunning = await checkVagrantStatus();
+            if (!isRunning) {
+                return [new ContainerItem('La máquina virtual no está corriendo', 'vm-stopped', vscode.TreeItemCollapsibleState.None)];
+            }
+
+            // Obtener lista de contenedores
+            const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}\'"');
+            const containers = output.split('\n').filter(line => line.trim());
+
+            if (containers.length === 0) {
+                return [new ContainerItem('No hay contenedores en ejecución', 'no-containers', vscode.TreeItemCollapsibleState.None)];
+            }
+
+            return containers.map(container => {
+                const [name, image, status, ports] = container.split('|');
+                const portMappings = this.parsePortMappings(ports);
+                const description = this.createDescription(status, portMappings);
+
+                return new ContainerItem(
+                    name.trim(),
+                    'container',
+                    vscode.TreeItemCollapsibleState.None,
+                    {
+                        title: "Acciones",
+                        command: "lgd-helper.showContainerActions",
+                        arguments: [name.trim()]
+                    },
+                    description,
+                    image
+                );
+            });
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            debugLog(`Error al obtener contenedores: ${errorMessage}`);
+            return [new ContainerItem(`Error: ${errorMessage}`, 'error', vscode.TreeItemCollapsibleState.None)];
+        }
+    }
+
+    private parsePortMappings(ports: string): {external: string, internal: string}[] {
+        const portMappings: {external: string, internal: string}[] = [];
+        const portRegex = /0\.0\.0\.0:(\d+)->(\d+)\/tcp/g;
+        let match;
+
+        while ((match = portRegex.exec(ports)) !== null) {
+            portMappings.push({
+                external: match[1],
+                internal: match[2]
+            });
+        }
+
+        return portMappings;
+    }
+
+    private createDescription(status: string, portMappings: {external: string, internal: string}[]): string {
+        let description = status;
+        if (portMappings.length > 0) {
+            const portInfo = portMappings.map(p => `${p.internal}→${p.external}`).join(', ');
+            description += ` | Puertos: ${portInfo}`;
+        }
+        return description;
+    }
+}
+
 // Función helper para logging que solo funciona en modo debug
 function debugLog(message: string) {
     if (isDebugging && outputChannel) {
@@ -47,6 +172,14 @@ export function activate(context: vscode.ExtensionContext) {
             vscode.window.registerWebviewViewProvider('lgdView', provider)
         );
         outputChannel.appendLine('WebviewViewProvider registrado');
+
+        // Registrar el proveedor de contenedores
+        const dockerContainersProvider = new DockerContainersProvider();
+        context.subscriptions.push(
+            vscode.window.createTreeView('lgdDockerContainers', {
+                treeDataProvider: dockerContainersProvider
+            })
+        );
 
         // Registrar comandos
         let commands = [
@@ -122,15 +255,21 @@ export function activate(context: vscode.ExtensionContext) {
             }),
             vscode.commands.registerCommand('lgd-helper.updateOdooModule', updateOdooModule),
             vscode.commands.registerCommand('lgd-helper.installOdooModule', installOdooModule),
-            vscode.commands.registerCommand('lgd-helper.showOdooContainerLogs', showOdooContainerLogs)
+            vscode.commands.registerCommand('lgd-helper.showOdooContainerLogs', showOdooContainerLogs),
+            vscode.commands.registerCommand('lgd-helper.refreshContainers', () => {
+                dockerContainersProvider.refresh();
+            }),
+            vscode.commands.registerCommand('lgd-helper.showContainerActions',
+                (containerName: string) => showContainerActions(containerName))
         ];
 
         context.subscriptions.push(...commands);
         outputChannel.appendLine('Comandos registrados');
         outputChannel.appendLine('Activación completada');
     } catch (error) {
-        outputChannel.appendLine(`Error durante la activación: ${error}`);
-        console.error('Error durante la activación:', error);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        outputChannel.appendLine(`Error durante la activación: ${errorMessage}`);
+        console.error('Error durante la activación:', errorMessage);
     }
 }
 
@@ -940,4 +1079,72 @@ async function ensureVagrantRunning(): Promise<boolean> {
     return false;
   }
   return true;
+}
+
+// Función para mostrar acciones disponibles para un contenedor
+async function showContainerActions(containerName: string) {
+    const actions = [
+        'Ver logs',
+        'Reiniciar contenedor',
+        'Abrir en navegador',
+        'Copiar nombre'
+    ];
+
+    const selectedAction = await vscode.window.showQuickPick(actions, {
+        placeHolder: `Selecciona una acción para ${containerName}`
+    });
+
+    if (!selectedAction) {
+        return; // Usuario canceló
+    }
+
+    switch (selectedAction) {
+        case 'Ver logs':
+            showContainerLogs(containerName);
+            break;
+        case 'Reiniciar contenedor':
+            restartContainer(containerName);
+            break;
+        case 'Abrir en navegador':
+            openInBrowser(containerName);
+            break;
+        case 'Copiar nombre':
+            vscode.env.clipboard.writeText(containerName);
+            vscode.window.showInformationMessage(`Nombre del contenedor copiado: ${containerName}`);
+            break;
+    }
+}
+
+// Función para ver logs de un contenedor
+async function showContainerLogs(containerName: string) {
+    const terminal = vscode.window.createTerminal(`Logs: ${containerName}`);
+    terminal.show();
+    terminal.sendText(`vagrant ssh -c "docker logs -f ${containerName}"`);
+}
+
+// Función para reiniciar un contenedor
+async function restartContainer(containerName: string) {
+    try {
+        await executeCommand(`vagrant ssh -c "docker restart ${containerName}"`);
+        vscode.window.showInformationMessage(`✅ Contenedor ${containerName} reiniciado`);
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error al reiniciar contenedor: ${error}`);
+    }
+}
+
+// Función para abrir en navegador
+async function openInBrowser(containerName: string) {
+    try {
+        const output = await executeCommand(`vagrant ssh -c "docker port ${containerName}"`);
+        const ports = output.match(/\d+/g);
+        if (ports && ports.length > 0) {
+            const port = ports[0];
+            const url = `http://localhost:${port}`;
+            vscode.env.openExternal(vscode.Uri.parse(url));
+        } else {
+            vscode.window.showInformationMessage('No se encontraron puertos expuestos');
+        }
+    } catch (error) {
+        vscode.window.showErrorMessage(`Error al abrir en navegador: ${error}`);
+    }
 }
