@@ -28,46 +28,4 @@ function listAvailableFolders() {
     return folders;
 }
 
-// function showMenu() {
-//     console.log('\n=== Gestor de Carpetas Prioritarias ===');
-//     console.log('1. Ver carpetas prioritarias');
-//     console.log('2. Seleccionar nueva carpeta prioritaria');
-//     console.log('3. Salir');
-
-//     rl.question('\nSeleccione una opción: ', (answer) => {
-//         switch(answer) {
-//             case '1':
-//                 const priorities = folderManager.getPriorityFolders();
-//                 console.log('\nCarpetas prioritarias:');
-//                 priorities.forEach((folder, index) => {
-//                     console.log(`${index + 1}. ${folder}`);
-//                 });
-//                 showMenu();
-//                 break;
-
-//             case '2':
-//                 const folders = listAvailableFolders();
-//                 rl.question('\nSeleccione el número de la carpeta: ', (folderIndex) => {
-//                     const selected = folders[parseInt(folderIndex) - 1];
-//                     if (selected) {
-//                         folderManager.setPriorityFolder(selected);
-//                         console.log(`Carpeta "${selected}" establecida como prioritaria`);
-//                     } else {
-//                         console.log('Selección inválida');
-//                     }
-//                     showMenu();
-//                 });
-//                 break;
-
-//             case '3':
-//                 rl.close();
-//                 break;
-
-//             default:
-//                 console.log('Opción inválida');
-//                 showMenu();
-//         }
-//     });
-// }
-
 showMenu();

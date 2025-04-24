@@ -501,7 +501,10 @@ export function activate(context: vscode.ExtensionContext) {
             debugLog(`Error detallado: ${error}`);
             vscode.window.showErrorMessage(`Error al crear el workspace: ${error.message}`);
         }
-    })
+    }),
+    vscode.commands.registerCommand('lgd-helper.updateOdooModule', updateOdooModule),
+    vscode.commands.registerCommand('lgd-helper.installOdooModule', installOdooModule),
+    vscode.commands.registerCommand('lgd-helper.showOdooContainerLogs', showOdooContainerLogs)
     ];
 
     context.subscriptions.push(...commands);
@@ -604,6 +607,12 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
           break;
         case 'updateOdooModule':
           updateOdooModule();
+          break;
+        case 'installOdooModule':
+          installOdooModule();
+          break;
+        case 'showOdooContainerLogs':
+          showOdooContainerLogs();
           break;
       }
     });
@@ -741,6 +750,8 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
           <div class="section">
             <h3>🦊 Odoo</h3>
             <button onclick="updateOdooModule()">🔄 Actualizar módulo</button>
+            <button onclick="installOdooModule()">📦 Instalar módulo</button>
+            <button onclick="showOdooContainerLogs()">�� Ver logs</button>
           </div>
 
           <script>
@@ -760,6 +771,14 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
 
             function updateOdooModule() {
               vscode.postMessage({ command: 'updateOdooModule' });
+            }
+
+            function installOdooModule() {
+              vscode.postMessage({ command: 'installOdooModule' });
+            }
+
+            function showOdooContainerLogs() {
+              vscode.postMessage({ command: 'showOdooContainerLogs' });
             }
 
             function checkStatus() {
@@ -1398,7 +1417,7 @@ async function restartContainer() {
   }
 }
 
-// Función simplificada para actualizar un módulo de Odoo en un contenedor
+// Función para actualizar un módulo de Odoo en un contenedor
 async function updateOdooModule() {
   debugLog('Iniciando función updateOdooModule');
   
@@ -1443,7 +1462,7 @@ async function updateOdooModule() {
     
     debugLog(`Contenedor seleccionado: ${selectedContainer}`);
 
-    // 3. Solicitar nombre del módulo directamente
+    // 3. Solicitar nombre del módulo
     const moduleName = await vscode.window.showInputBox({
       prompt: 'Ingresa el nombre del módulo a actualizar',
       placeHolder: 'Ejemplo: base, web, sale, purchase, etc.'
@@ -1474,16 +1493,179 @@ async function updateOdooModule() {
     const terminal = vscode.window.createTerminal(`Actualizar: ${moduleName}`);
     terminal.show();
     
-    // Comando para actualizar el módulo
-    const updateCommand = `docker exec ${selectedContainer} odoo -u ${moduleName} -d odoo --stop-after-init`;
+    // Usar el nombre del contenedor como nombre de la base de datos
+    // Extraer el nombre base del contenedor (sin números o sufijos)
+    const dbName = selectedContainer.split('-')[0].replace(/\d+$/, '');
     
-    debugLog(`Ejecutando comando: ${updateCommand}`);
-    terminal.sendText(`vagrant ssh -c "${updateCommand}"`);
+    // Comando para actualizar el módulo
+    // Usar comillas dobles alrededor del comando completo
+    const updateCommand = `"docker exec ${selectedContainer} odoo -u ${moduleName} -d ${selectedContainer} --stop-after-init"`;
+    
+    debugLog(`Ejecutando comando: vagrant ssh -c ${updateCommand}`);
+    terminal.sendText(`vagrant ssh -c ${updateCommand}`);
     
     vscode.window.showInformationMessage(`Actualización de ${moduleName} iniciada. Revisa la terminal para ver el progreso.`);
 
   } catch (error) {
-    debugLog(`Error al actualizar módulo: ${error}`);
-    vscode.window.showErrorMessage(`Error al actualizar módulo: ${error}`);
+    debugLog(`Error al actualizar módulo: ${error instanceof Error ? error.message : String(error)}`);
+    vscode.window.showErrorMessage(`Error al actualizar módulo: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Función para instalar un módulo de Odoo en un contenedor
+async function installOdooModule() {
+  debugLog('Iniciando función installOdooModule');
+  
+  if (!(await ensureVagrantRunning())) {
+    debugLog('La máquina virtual no está corriendo');
+    return;
+  }
+
+  try {
+    // 1. Obtener lista de contenedores Odoo
+    debugLog('Obteniendo lista de contenedores Odoo');
+    const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}|{{.Image}}\'"');
+    const containers = output.split('\n')
+      .filter(line => line.trim())
+      .filter(line => {
+        const [_, image] = line.split('|');
+        // Filtrar solo contenedores que probablemente sean de Odoo
+        return image && (
+          image.toLowerCase().includes('odoo') || 
+          image.toLowerCase().includes('dashboard') ||
+          image.toLowerCase().includes('control')
+        );
+      })
+      .map(line => line.split('|')[0].trim());
+
+    debugLog(`Contenedores Odoo encontrados: ${containers.join(', ')}`);
+
+    if (containers.length === 0) {
+      vscode.window.showInformationMessage('No se encontraron contenedores de Odoo');
+      return;
+    }
+
+    // 2. Seleccionar contenedor
+    const selectedContainer = await vscode.window.showQuickPick(containers, {
+      placeHolder: 'Selecciona un contenedor de Odoo'
+    });
+
+    if (!selectedContainer) {
+      debugLog('Usuario canceló la selección de contenedor');
+      return;
+    }
+    
+    debugLog(`Contenedor seleccionado: ${selectedContainer}`);
+
+    // 3. Solicitar nombre del módulo
+    const moduleName = await vscode.window.showInputBox({
+      prompt: 'Ingresa el nombre del módulo a instalar',
+      placeHolder: 'Ejemplo: base, web, sale, purchase, etc.'
+    });
+    
+    if (!moduleName) {
+      debugLog('Usuario canceló la entrada del nombre del módulo');
+      return;
+    }
+    
+    debugLog(`Módulo ingresado: ${moduleName}`);
+
+    // 4. Confirmar instalación
+    const confirmInstall = await vscode.window.showWarningMessage(
+      `¿Estás seguro de que deseas instalar el módulo "${moduleName}" en el contenedor "${selectedContainer}"?`,
+      'Sí, instalar', 'Cancelar'
+    );
+
+    if (confirmInstall !== 'Sí, instalar') {
+      debugLog('Usuario canceló la instalación');
+      return;
+    }
+
+    // 5. Ejecutar instalación
+    vscode.window.showInformationMessage(`Instalando módulo ${moduleName}...`);
+    
+    // Crear terminal para mostrar el progreso
+    const terminal = vscode.window.createTerminal(`Instalar: ${moduleName}`);
+    terminal.show();
+    
+    // Usar el nombre del contenedor como nombre de la base de datos
+    // Extraer el nombre base del contenedor (sin números o sufijos)
+    const dbName = selectedContainer.split('-')[0].replace(/\d+$/, '');
+    
+    // Comando para instalar el módulo
+    // Usar comillas dobles alrededor del comando completo
+    const installCommand = `"docker exec ${selectedContainer} odoo -i ${moduleName} -d ${selectedContainer} --stop-after-init"`;
+    
+    debugLog(`Ejecutando comando: vagrant ssh -c ${installCommand}`);
+    terminal.sendText(`vagrant ssh -c ${installCommand}`);
+    
+    vscode.window.showInformationMessage(`Instalación de ${moduleName} iniciada. Revisa la terminal para ver el progreso.`);
+
+  } catch (error) {
+    debugLog(`Error al instalar módulo: ${error instanceof Error ? error.message : String(error)}`);
+    vscode.window.showErrorMessage(`Error al instalar módulo: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Función para mostrar los logs de un contenedor Odoo
+async function showOdooContainerLogs() {
+  debugLog('Iniciando función showOdooContainerLogs');
+  
+  if (!(await ensureVagrantRunning())) {
+    debugLog('La máquina virtual no está corriendo');
+    return;
+  }
+
+  try {
+    // 1. Obtener lista de contenedores Odoo
+    debugLog('Obteniendo lista de contenedores Odoo');
+    const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}|{{.Image}}\'"');
+    const containers = output.split('\n')
+      .filter(line => line.trim())
+      .filter(line => {
+        const [_, image] = line.split('|');
+        // Filtrar solo contenedores que probablemente sean de Odoo
+        return image && (
+          image.toLowerCase().includes('odoo') || 
+          image.toLowerCase().includes('dashboard') ||
+          image.toLowerCase().includes('control')
+        );
+      })
+      .map(line => line.split('|')[0].trim());
+
+    debugLog(`Contenedores Odoo encontrados: ${containers.join(', ')}`);
+
+    if (containers.length === 0) {
+      vscode.window.showInformationMessage('No se encontraron contenedores de Odoo');
+      return;
+    }
+
+    // 2. Seleccionar contenedor
+    const selectedContainer = await vscode.window.showQuickPick(containers, {
+      placeHolder: 'Selecciona un contenedor para ver sus logs'
+    });
+
+    if (!selectedContainer) {
+      debugLog('Usuario canceló la selección de contenedor');
+      return;
+    }
+    
+    debugLog(`Contenedor seleccionado: ${selectedContainer}`);
+
+    // 3. Crear terminal para mostrar los logs
+    const terminal = vscode.window.createTerminal(`Logs: ${selectedContainer}`);
+    terminal.show();
+    
+    // Comando para mostrar los logs
+    const logsCommand = `"docker logs -f ${selectedContainer}"`;
+    
+    debugLog(`Ejecutando comando: vagrant ssh -c ${logsCommand}`);
+    terminal.sendText(`vagrant ssh -c ${logsCommand}`);
+    
+    vscode.window.showInformationMessage(`Mostrando logs del contenedor ${selectedContainer}. Presiona Ctrl+C en la terminal para detener.`);
+
+  } catch (error) {
+    debugLog(`Error al mostrar logs: ${error instanceof Error ? error.message : String(error)}`);
+    vscode.window.showErrorMessage(`Error al mostrar logs: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

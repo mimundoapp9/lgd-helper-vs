@@ -92,6 +92,18 @@
       {
         "command": "lgd-helper.showContainerActions",
         "title": "Mostrar Acciones del Contenedor"
+      },
+      {
+        "command": "lgd-helper.updateOdooModule",
+        "title": "LGD: Actualizar Módulo de Odoo"
+      },
+      {
+        "command": "lgd-helper.installOdooModule",
+        "title": "LGD: Instalar Módulo de Odoo"
+      },
+      {
+        "command": "lgd-helper.showOdooContainerLogs",
+        "title": "LGD: Ver Logs de Contenedor Odoo"
       }
     ],
     "menus": {
