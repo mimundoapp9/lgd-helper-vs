@@ -249,7 +249,7 @@ function executeVagrantCommand(command: string, message: string) {
   terminal.sendText(`vagrant ${command}`);
   
   // Mostrar mensaje de información
-  vscode.window.showInformationMessage(message);
+  // vscode.window.showInformationMessage(message);
   
   // Opcionalmente, podemos cerrar la terminal después de un tiempo
   setTimeout(() => {
@@ -259,6 +259,7 @@ function executeVagrantCommand(command: string, message: string) {
 
 class LGDViewProvider implements vscode.WebviewViewProvider {
   private _view?: vscode.WebviewView;
+  private _vmStatus: string = 'unknown'; // Estado inicial desconocido
 
   constructor(private readonly context: vscode.ExtensionContext) {}
 
@@ -276,15 +277,22 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
       ]
     };
 
+    // Verificar estado inicial
+    this._checkAndUpdateStatus();
+
     webviewView.webview.html = this._getHtmlContent();
 
     webviewView.webview.onDidReceiveMessage(async (data) => {
       switch (data.command) {
         case 'startVM':
           executeVagrantCommand('up', '🚀 Iniciando máquina virtual...');
+          // Actualizar estado después de un tiempo
+          setTimeout(() => this._checkAndUpdateStatus(), 5000);
           break;
         case 'stopVM':
           executeVagrantCommand('halt', '🛑 Deteniendo máquina virtual...');
+          // Actualizar estado después de un tiempo
+          setTimeout(() => this._checkAndUpdateStatus(), 5000);
           break;
         case 'showLogs':
           showContainerLogs();
@@ -296,7 +304,7 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
           showDatabases();
           break;
         case 'checkStatus':
-          vscode.commands.executeCommand('lgd-helper.checkStatus');
+          this._checkAndUpdateStatus();
           break;
         case 'showDebugLogs':
           showDebugLogs();
@@ -305,7 +313,60 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
     });
   }
 
+  // Método para verificar y actualizar el estado
+  private async _checkAndUpdateStatus() {
+    try {
+      const output = await executeCommand('vagrant status');
+      
+      if (output.toLowerCase().includes('running')) {
+        this._vmStatus = 'running';
+      } else if (output.toLowerCase().includes('poweroff')) {
+        this._vmStatus = 'stopped';
+      } else if (output.toLowerCase().includes('not created')) {
+        this._vmStatus = 'not-created';
+      } else {
+        this._vmStatus = 'unknown';
+      }
+      
+      // Actualizar la UI
+      if (this._view) {
+        this._view.webview.html = this._getHtmlContent();
+      }
+    } catch (error) {
+      this._vmStatus = 'error';
+      if (this._view) {
+        this._view.webview.html = this._getHtmlContent();
+      }
+    }
+  }
+
   private _getHtmlContent(): string {
+    // Determinar el texto y estilo del indicador de estado
+    let statusText = '';
+    let statusClass = '';
+    
+    switch (this._vmStatus) {
+      case 'running':
+        statusText = '✅ Máquina Virtual: ACTIVA';
+        statusClass = 'status-running';
+        break;
+      case 'stopped':
+        statusText = '⚠️ Máquina Virtual: DETENIDA';
+        statusClass = 'status-stopped';
+        break;
+      case 'not-created':
+        statusText = '❌ Máquina Virtual: NO CREADA';
+        statusClass = 'status-error';
+        break;
+      case 'error':
+        statusText = '❌ Error al verificar estado';
+        statusClass = 'status-error';
+        break;
+      default:
+        statusText = '❓ Estado: Desconocido';
+        statusClass = 'status-unknown';
+    }
+
     return `
       <!DOCTYPE html>
       <html lang="es">
@@ -341,14 +402,39 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
               border: 1px solid var(--vscode-panel-border);
               border-radius: 4px;
             }
+            .status-indicator {
+              padding: 8px;
+              margin-bottom: 10px;
+              border-radius: 4px;
+              text-align: center;
+              font-weight: bold;
+            }
+            .status-running {
+              background-color: rgba(0, 128, 0, 0.2);
+              color: var(--vscode-terminal-ansiGreen);
+            }
+            .status-stopped {
+              background-color: rgba(255, 165, 0, 0.2);
+              color: var(--vscode-terminal-ansiYellow);
+            }
+            .status-error {
+              background-color: rgba(255, 0, 0, 0.2);
+              color: var(--vscode-terminal-ansiRed);
+            }
+            .status-unknown {
+              background-color: rgba(128, 128, 128, 0.2);
+              color: var(--vscode-terminal-ansiBrightBlack);
+            }
           </style>
         </head>
         <body>
           <div class="section">
-            <h3>🖥️ Máquina Virtual</h3>
+            <div class="status-indicator ${statusClass}">
+              ${statusText}
+            </div>
+            <button onclick="checkStatus()">🔍 Verificar Estado</button>
             <button onclick="startVM()">✨ Iniciar Máquina Virtual</button>
             <button onclick="stopVM()" class="stop-button">🛑 Detener Máquina Virtual</button>
-            <button onclick="checkStatus()">🔍 Verificar Estado</button>
           </div>
 
           <div class="section">
@@ -392,6 +478,11 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
             function showDebugLogs() {
               vscode.postMessage({ command: 'showDebugLogs' });
             }
+            
+            // Verificar estado automáticamente cada 30 segundos
+            setInterval(() => {
+              vscode.postMessage({ command: 'checkStatus' });
+            }, 30000);
           </script>
         </body>
       </html>
@@ -512,38 +603,62 @@ async function listContainerPorts() {
     }
 
     try {
-        await loadContainerPorts();
+        // Obtener información detallada de los puertos
+        const output = await executeCommand('vagrant ssh -c "docker ps --format \'{{.Names}}|{{.Image}}|{{.Ports}}\'"');
+        const containers = output.split('\n').filter(line => line.trim());
+        
+        const containerPortMappings = new Map<string, {external: string, internal: string}[]>();
+        
+        containers.forEach(line => {
+            const [name, image, ports] = line.split('|');
+            if (!ports) return;
+            
+            // Buscar todos los mapeos de puertos con formato: 0.0.0.0:EXTERNO->INTERNO/tcp
+            const portRegex = /0\.0\.0\.0:(\d+)->(\d+)\/tcp/g;
+            let match;
+            const mappings: {external: string, internal: string}[] = [];
+            
+            while ((match = portRegex.exec(ports)) !== null) {
+                mappings.push({
+                    external: match[1],
+                    internal: match[2]
+                });
+            }
+            
+            if (mappings.length > 0) {
+                containerPortMappings.set(name.trim(), mappings);
+            }
+        });
 
         const terminal = vscode.window.createTerminal({
             name: 'LGD Ports',
             cwd: VAGRANT_DIR,
-            hideFromUser: true // Ocultar el comando
+            hideFromUser: true
         });
 
         // Construir el comando completo
         const command = [
-            'clear', // Limpiar terminal primero
+            'clear',
             'echo "🔗 Enlaces disponibles:"',
             'echo ""',
             'echo "Seguir vínculo (ctrl + clic)"',
             'echo ""'
         ];
 
-        // Añadir los enlaces con nombre del contenedor
-        containerPorts.forEach((ports, containerName) => {
-            if (ports.length > 0) {
-                ports.forEach(port => {
-                    const formattedName = containerName.padEnd(40, ' ');
-                    command.push(`echo "${formattedName} ➜ http://192.168.56.10:${port}"`);
-                });
-            }
+        // Añadir los enlaces con nombre del contenedor y puerto interno
+        containerPortMappings.forEach((mappings, containerName) => {
+            mappings.forEach(mapping => {
+                const portInfo = `(${mapping.internal})`;
+                const formattedName = `${containerName} ${portInfo}`.padEnd(40, ' ');
+                command.push(`echo "${formattedName} ➜ http://192.168.56.10:${mapping.external}"`);
+            });
         });
 
         command.push('echo ""');
         command.push('echo "✅ Listado completado."');
 
         terminal.show();
-        terminal.sendText(command.join(' && '), true); // true = no añadir nueva línea
+        terminal.sendText(command.join(' && '), true);
 
     } catch (error) {
         debugLog(`Error al listar puertos: ${error}`);
