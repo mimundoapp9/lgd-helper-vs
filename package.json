@@ -35,10 +35,6 @@
           "id": "lgdView",
           "name": "LGD Tools",
           "icon": "media/lgd-icon.svg"
-        },
-        {
-          "id": "dockerContainers",
-          "name": "Contenedores Docker"
         }
       ]
     },
@@ -76,22 +72,8 @@
         "title": "📁 Seleccionar Carpeta Prioritaria"
       },
       {
-        "command": "lgd-helper.removePriorityFolder",
-        "title": "❌ Remover Carpeta Prioritaria",
-        "icon": "$(close)"
-      },
-      {
         "command": "lgd-helper.createWorkspace",
         "title": "🗂 Crear Workspace de Turbodega"
-      },
-      {
-        "command": "lgd-helper.refreshContainers",
-        "title": "Refrescar Contenedores",
-        "icon": "$(refresh)"
-      },
-      {
-        "command": "lgd-helper.showContainerActions",
-        "title": "Mostrar Acciones del Contenedor"
       },
       {
         "command": "lgd-helper.updateOdooModule",
@@ -123,25 +105,6 @@
         },
         {
           "command": "lgd-helper.stopVM"
-        }
-      ],
-      "view/item/context": [
-        {
-          "command": "lgd-helper.removePriorityFolder",
-          "when": "view == priorityFolders",
-          "group": "inline"
-        },
-        {
-          "command": "lgd-helper.showContainerActions",
-          "when": "view == dockerContainers && viewItem == container",
-          "group": "inline"
-        }
-      ],
-      "view/title": [
-        {
-          "command": "lgd-helper.refreshContainers",
-          "when": "view == dockerContainers",
-          "group": "navigation"
         }
       ]
     },
