@@ -54,6 +54,9 @@ export function activate(context: vscode.ExtensionContext) {
         outputChannel.appendLine(`Workspace: ${vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || 'none'}`);
     }
 
+    // Validar la estructura del workspace
+    validateWorkspaceStructure();
+
     // Registrar el WebviewViewProvider
     const provider = new LGDViewProvider(context);
     context.subscriptions.push(
@@ -189,29 +192,31 @@ export function activate(context: vscode.ExtensionContext) {
         }
     }),
     vscode.commands.registerCommand('lgd-helper.createWorkspace', async () => {
-        const workspaceRoot = vscode.workspace.workspaceFolders?.[0].uri.fsPath;
+        const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
         if (!workspaceRoot) {
             vscode.window.showErrorMessage('No hay un workspace abierto');
             return;
         }
 
-        const devPath = path.join(workspaceRoot, 'dev');
-        if (!fs.existsSync(devPath)) {
-            vscode.window.showErrorMessage('No se encuentra la carpeta dev');
-            return;
-        }
+        // Asegurarse de que estamos en la raíz (donde está el Vagrantfile) y no en /dev
+        const rootPath = workspaceRoot.endsWith('/dev') 
+            ? path.dirname(workspaceRoot) 
+            : workspaceRoot;
+        
+        const devPath = path.join(rootPath, 'dev');
+        debugLog(`Intentando crear workspace con rootPath: ${rootPath}, devPath: ${devPath}`);
 
         try {
             const workspacePath = await createWorkspace(devPath);
+            debugLog(`Workspace creado exitosamente en: ${workspacePath}`);
 
-            // Abrir el workspace
             const uri = vscode.Uri.file(workspacePath);
             await vscode.commands.executeCommand('vscode.openFolder', uri);
 
             vscode.window.showInformationMessage('Workspace creado exitosamente');
         } catch (error) {
-            vscode.window.showErrorMessage('Error al crear el workspace');
-            console.error(error);
+            debugLog(`Error detallado: ${error}`);
+            vscode.window.showErrorMessage(`Error al crear el workspace: ${error.message}`);
         }
     })
     ];
@@ -224,22 +229,32 @@ export function activate(context: vscode.ExtensionContext) {
         const priorityFolderProvider = new PriorityFolderProvider(workspaceRoot);
         vscode.window.registerTreeDataProvider('priorityFolders', priorityFolderProvider);
     }
-
-    // Cargar puertos al inicio
-    loadContainerPorts();
 }
 
 function executeVagrantCommand(command: string, message: string) {
   debugLog(`Ejecutando vagrant ${command} en ${VAGRANT_DIR}`);
 
+  // Crear un terminal oculto
   const terminal = vscode.window.createTerminal({
     name: "LGD – VM",
-    cwd: VAGRANT_DIR // Especificar el directorio de trabajo
+    cwd: VAGRANT_DIR,
+    shellPath: '/bin/zsh',
+    env: {
+      TERM: 'xterm-256color'
+    },
+    hideFromUser: true // Ocultar la terminal
   });
 
-  terminal.show();
+  // Ejecutar el comando
   terminal.sendText(`vagrant ${command}`);
+  
+  // Mostrar mensaje de información
   vscode.window.showInformationMessage(message);
+  
+  // Opcionalmente, podemos cerrar la terminal después de un tiempo
+  setTimeout(() => {
+    terminal.dispose();
+  }, 60000); // Cerrar después de 1 minuto (ajustar según sea necesario)
 }
 
 class LGDViewProvider implements vscode.WebviewViewProvider {
@@ -611,7 +626,22 @@ function showDebugLogs() {
 async function createWorkspace(devPath: string): Promise<string> {
     try {
         const workspaceRoot = path.dirname(devPath);
+        
+        // Verificar que existe el Vagrantfile en la raíz
+        const vagrantFilePath = path.join(workspaceRoot, 'Vagrantfile');
+        if (!fs.existsSync(vagrantFilePath)) {
+            debugLog(`No se encontró Vagrantfile en ${workspaceRoot}`);
+            throw new Error('No se encontró Vagrantfile en el directorio raíz');
+        }
+
+        // Verificar que existe la carpeta dev
+        if (!fs.existsSync(devPath) || !fs.statSync(devPath).isDirectory()) {
+            debugLog(`La carpeta dev no existe en ${workspaceRoot}`);
+            throw new Error('No se encontró la carpeta dev');
+        }
+
         const rootName = path.basename(workspaceRoot);
+        debugLog(`Creando workspace para ${rootName} con devPath: ${devPath}`);
 
         // Obtener archivos y carpetas de dev
         const devItems = fs.readdirSync(devPath).map(item => ({
@@ -699,7 +729,51 @@ async function createWorkspace(devPath: string): Promise<string> {
 
         return workspacePath;
     } catch (error) {
-        console.error('Error al crear workspace:', error);
+        debugLog(`Error al crear workspace: ${error}`);
         throw error;
+    }
+}
+
+// Función para validar la estructura del workspace
+async function validateWorkspaceStructure() {
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (!workspaceRoot) {
+        return; // No hay workspace abierto
+    }
+
+    debugLog(`Validando estructura del workspace: ${workspaceRoot}`);
+
+    // Verificar si estamos en la carpeta dev
+    const isInDevFolder = workspaceRoot.endsWith('/dev');
+    
+    // Verificar si hay un Vagrantfile en el directorio actual o en el padre (si estamos en dev)
+    const vagrantFilePath = isInDevFolder 
+        ? path.join(path.dirname(workspaceRoot), 'Vagrantfile')
+        : path.join(workspaceRoot, 'Vagrantfile');
+    
+    const vagrantFileExists = fs.existsSync(vagrantFilePath);
+    
+    debugLog(`¿Estamos en carpeta dev? ${isInDevFolder}`);
+    debugLog(`¿Existe Vagrantfile? ${vagrantFileExists} (buscado en ${vagrantFilePath})`);
+
+    // Si estamos en dev pero no hay Vagrantfile en el directorio padre
+    if (isInDevFolder && !vagrantFileExists) {
+        const message = 'Estás trabajando dentro de la carpeta "dev". Para un funcionamiento óptimo, abre el workspace en la carpeta raíz que contiene el Vagrantfile.';
+        const action = await vscode.window.showWarningMessage(message, 'Abrir carpeta raíz', 'Ignorar');
+        
+        if (action === 'Abrir carpeta raíz') {
+            const parentUri = vscode.Uri.file(path.dirname(workspaceRoot));
+            await vscode.commands.executeCommand('vscode.openFolder', parentUri);
+        }
+    }
+    // Si no estamos en dev y no hay Vagrantfile
+    else if (!isInDevFolder && !vagrantFileExists) {
+        // Buscar si hay una carpeta dev
+        const devFolderPath = path.join(workspaceRoot, 'dev');
+        const devFolderExists = fs.existsSync(devFolderPath) && fs.statSync(devFolderPath).isDirectory();
+        
+        if (!devFolderExists) {
+            vscode.window.showErrorMessage('Esta extensión requiere un Vagrantfile en la raíz y una carpeta "dev". La estructura actual no es compatible.');
+        }
     }
 }
