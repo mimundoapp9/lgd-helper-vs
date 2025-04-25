@@ -1136,15 +1136,22 @@ async function restartContainer(containerName: string) {
 async function openInBrowser(containerName: string) {
     try {
         const output = await executeCommand(`vagrant ssh -c "docker port ${containerName}"`);
-        const ports = output.match(/\d+/g);
-        if (ports && ports.length > 0) {
-            const port = ports[0];
-            const url = `http://localhost:${port}`;
+        // Buscar el primer puerto mapeado (8069/tcp -> 0.0.0.0:16832)
+        const portMapping = output.match(/(\d+)\/tcp -> 0\.0\.0\.0:(\d+)/);
+
+        if (portMapping && portMapping[2]) {
+            const hostPort = portMapping[2]; // Puerto mapeado al host (16832)
+            const internalPort = portMapping[1]; // Puerto interno (8069)
+            const url = `http://192.168.56.10:${hostPort}`;
             vscode.env.openExternal(vscode.Uri.parse(url));
+            debugLog(`Abriendo URL: ${url} (puerto interno: ${internalPort})`);
         } else {
             vscode.window.showInformationMessage('No se encontraron puertos expuestos');
+            debugLog(`No se encontró mapeo de puertos para ${containerName}. Output: ${output}`);
         }
     } catch (error) {
-        vscode.window.showErrorMessage(`Error al abrir en navegador: ${error}`);
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        debugLog(`Error al abrir en navegador: ${errorMessage}`);
+        vscode.window.showErrorMessage(`Error al abrir en navegador: ${errorMessage}`);
     }
 }
