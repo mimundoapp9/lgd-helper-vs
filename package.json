@@ -1,7 +1,7 @@
 {
   "name": "lgd-helper",
   "displayName": "lgd-helper",
-  "description": "tools for lgd",
+  "description": "Herramienta para gestionar entornos LGD",
   "version": "0.0.1",
   "repository": {
     "type": "git",
