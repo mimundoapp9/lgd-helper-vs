@@ -73,12 +73,8 @@
         "title": "🔍 Mostrar Logs de Depuración LGD"
       },
       {
-        "command": "lgd-helper.selectPriorityFolder",
-        "title": "📁 Seleccionar Carpeta Prioritaria"
-      },
-      {
         "command": "lgd-helper.createWorkspace",
-        "title": "🗂 Crear Workspace de Turbodega"
+        "title": "🗂 Crear Workspace de lgd"
       },
       {
         "command": "lgd-helper.updateOdooModule",
