@@ -274,29 +274,39 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 function executeVagrantCommand(command: string, message: string) {
-  debugLog(`Ejecutando vagrant ${command} en ${VAGRANT_DIR}`);
+    debugLog(`Ejecutando vagrant ${command} en ${VAGRANT_DIR}`);
 
-  // Crear un terminal oculto
-  const terminal = vscode.window.createTerminal({
-    name: "LGD – VM",
-    cwd: VAGRANT_DIR,
-    shellPath: '/bin/zsh',
-    env: {
-      TERM: 'xterm-256color'
-    },
-    hideFromUser: true // Ocultar la terminal
-  });
+    // Crear un terminal oculto
+    const terminal = vscode.window.createTerminal({
+        name: "LGD – VM",
+        cwd: VAGRANT_DIR,
+        shellPath: '/bin/zsh',
+        env: {
+            TERM: 'xterm-256color'
+        },
+        hideFromUser: true
+    });
 
-  // Ejecutar el comando
-  terminal.sendText(`vagrant ${command}`);
+    // Ejecutar el comando vagrant
+    terminal.sendText(`vagrant ${command}`);
 
-  // Mostrar mensaje de información
-  // vscode.window.showInformationMessage(message);
+    // Si el comando es 'up', iniciar rsync-auto
+    if (command === 'up') {
+        // Esperar un poco para que la VM termine de iniciar
+        setTimeout(() => {
+            debugLog('Iniciando rsync-auto');
+            // Ejecutar rsync-auto en segundo plano
+            terminal.sendText('nohup vagrant rsync-auto > /dev/null 2>&1 &');
+        }, 10000); // Esperar 10 segundos antes de iniciar rsync-auto
+    }
 
-  // Opcionalmente, podemos cerrar la terminal después de un tiempo
-  setTimeout(() => {
-    terminal.dispose();
-  }, 60000); // Cerrar después de 1 minuto (ajustar según sea necesario)
+    // Mostrar mensaje de información
+    // vscode.window.showInformationMessage(message);
+
+    // Opcionalmente, podemos cerrar la terminal después de un tiempo
+    setTimeout(() => {
+        terminal.dispose();
+    }, 60000); // Cerrar después de 1 minuto
 }
 
 class LGDViewProvider implements vscode.WebviewViewProvider {
