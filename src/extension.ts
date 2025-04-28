@@ -436,11 +436,42 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
               background: var(--vscode-button-background);
               color: var(--vscode-button-foreground);
               border: none;
-              border-radius: 2px;
+              border-radius: 4px;
               cursor: pointer;
+              position: relative;
+              overflow: hidden;
+              transition: all 0.3s ease;
             }
             button:hover {
               background: var(--vscode-button-hoverBackground);
+              transform: translateY(-1px);
+              box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+            }
+            button:active {
+              transform: translateY(1px);
+              box-shadow: none;
+            }
+            button.loading {
+              pointer-events: none;
+              opacity: 0.7;
+            }
+            button.loading::after {
+              content: '';
+              position: absolute;
+              width: 20px;
+              height: 20px;
+              top: 50%;
+              right: 10px;
+              transform: translateY(-50%);
+              border: 2px solid transparent;
+              border-radius: 50%;
+              border-top-color: var(--vscode-button-foreground);
+              animation: spin 0.8s linear infinite;
+            }
+            @keyframes spin {
+              to {
+                transform: translateY(-50%) rotate(360deg);
+              }
             }
             .stop-button {
               background: var(--vscode-errorForeground);
@@ -450,6 +481,11 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
               padding: 10px;
               border: 1px solid var(--vscode-panel-border);
               border-radius: 4px;
+              transition: all 0.3s ease;
+            }
+            .section:hover {
+              border-color: var(--vscode-focusBorder);
+              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
             }
             .status-indicator {
               padding: 8px;
@@ -457,6 +493,7 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
               border-radius: 4px;
               text-align: center;
               font-weight: bold;
+              transition: all 0.3s ease;
             }
             .status-running {
               background-color: rgba(0, 128, 0, 0.2);
@@ -475,65 +512,57 @@ class LGDViewProvider implements vscode.WebviewViewProvider {
               color: var(--vscode-terminal-ansiBrightBlack);
             }
           </style>
-        </head>
-        <body>
-          <div class="section">
-            <div class="status-indicator ${statusClass}">
-              ${statusText}
-            </div>
-            <button onclick="checkStatus()">🔍 Verificar Estado</button>
-            <button onclick="startVM()">✨ Iniciar Máquina Virtual</button>
-            <button onclick="stopVM()" class="stop-button">🛑 Detener Máquina Virtual</button>
-          </div>
-
-          <div class="section">
-            <h3>🗄️ Base de Datos</h3>
-            <button onclick="showDatabases()">💾 Gestionar bases de datos</button>
-          </div>
-
-          <div class="section">
-            <h3>🦊 Odoo</h3>
-            <button onclick="updateOdooModule()">🔄 Actualizar módulo</button>
-            <button onclick="installOdooModule()">📦 Instalar módulo</button>
-            <button onclick="showOdooContainerLogs()"> Ver logs</button>
-          </div>
-
           <script>
             const vscode = acquireVsCodeApi();
 
-            function startVM() {
-              vscode.postMessage({ command: 'startVM' });
-            }
+            function handleButtonClick(command, buttonId) {
+              const button = document.getElementById(buttonId);
+              button.classList.add('loading');
 
-            function stopVM() {
-              vscode.postMessage({ command: 'stopVM' });
-            }
+              // Enviar comando
+              vscode.postMessage({ command: command });
 
-            function showDatabases() {
-              vscode.postMessage({ command: 'showDatabases' });
+              // Remover clase loading después de un tiempo
+              setTimeout(() => {
+                button.classList.remove('loading');
+              }, 2000);
             }
-
-            function updateOdooModule() {
-              vscode.postMessage({ command: 'updateOdooModule' });
-            }
-
-            function installOdooModule() {
-              vscode.postMessage({ command: 'installOdooModule' });
-            }
-
-            function showOdooContainerLogs() {
-              vscode.postMessage({ command: 'showOdooContainerLogs' });
-            }
-
-            function checkStatus() {
-              vscode.postMessage({ command: 'checkStatus' });
-            }
-
-            // Verificar estado automáticamente cada 30 segundos
-            setInterval(() => {
-              vscode.postMessage({ command: 'checkStatus' });
-            }, 30000);
           </script>
+        </head>
+        <body>
+          <div class="status-indicator ${statusClass}">
+            ${statusText}
+          </div>
+
+          <div class="section">
+            <h3>Control de Máquina Virtual</h3>
+            <button id="startButton" onclick="handleButtonClick('startVM', 'startButton')">
+              🚀 Iniciar Máquina Virtual
+            </button>
+            <button id="stopButton" class="stop-button" onclick="handleButtonClick('stopVM', 'stopButton')">
+              🛑 Detener Máquina Virtual
+            </button>
+          </div>
+
+          <div class="section">
+            <h3>Herramientas Odoo</h3>
+            <button id="updateButton" onclick="handleButtonClick('updateOdooModule', 'updateButton')">
+              🔄 Actualizar Módulo
+            </button>
+            <button id="installButton" onclick="handleButtonClick('installOdooModule', 'installButton')">
+              📦 Instalar Módulo
+            </button>
+            <button id="logsButton" onclick="handleButtonClick('showOdooContainerLogs', 'logsButton')">
+              📋 Ver Logs
+            </button>
+          </div>
+
+          <div class="section">
+            <h3>Herramientas de Desarrollo</h3>
+            <button id="debugButton" onclick="handleButtonClick('showDebugLogs', 'debugButton')">
+              🔍 Ver Logs de Depuración
+            </button>
+          </div>
         </body>
       </html>
     `;
