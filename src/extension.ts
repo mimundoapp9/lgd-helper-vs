@@ -1180,7 +1180,7 @@ async function openInBrowser(containerName: string) {
         debugLog('Obteniendo IP de la máquina virtual (192.168.x.x)');
         const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
         const vmIpOutput = await executeCommand(vmIpCommand);
-        const vmIp = vmIpOutput.trim();
+        let vmIp = vmIpOutput.trim();
         
         if (!vmIp) {
             debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
