@@ -1176,17 +1176,28 @@ async function openInBrowser(containerName: string) {
     try {
         debugLog(`INICIO: openInBrowser para contenedor ${containerName}`);
         
-        // Obtener la IP de la máquina virtual
-        debugLog('Obteniendo IP de la máquina virtual');
-        const vmIpCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
+        // Obtener la IP de la máquina virtual que comienza con 192.168
+        debugLog('Obteniendo IP de la máquina virtual (192.168.x.x)');
+        const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
         const vmIpOutput = await executeCommand(vmIpCommand);
         const vmIp = vmIpOutput.trim();
         
         if (!vmIp) {
-            throw new Error('No se pudo obtener la IP de la máquina virtual');
+            debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
+            // Fallback: intentar obtener cualquier IP si no hay una que comience con 192.168
+            const allIpsCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
+            const allIpsOutput = await executeCommand(allIpsCommand);
+            const fallbackIp = allIpsOutput.trim();
+            
+            if (!fallbackIp) {
+                throw new Error('No se pudo obtener ninguna IP de la máquina virtual');
+            }
+            
+            debugLog(`Usando IP alternativa: ${fallbackIp}`);
+            vmIp = fallbackIp;
         }
         
-        debugLog(`IP de la máquina virtual: ${vmIp}`);
+        debugLog(`IP de la máquina virtual seleccionada: ${vmIp}`);
         
         // Obtener el mapeo de puertos del contenedor
         debugLog(`Obteniendo mapeo de puertos para ${containerName}`);
