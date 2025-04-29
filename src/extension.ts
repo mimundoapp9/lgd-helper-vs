@@ -280,7 +280,7 @@ function executeVagrantCommand(command: string, message: string) {
     const terminal = vscode.window.createTerminal({
         name: "LGD – VM",
         cwd: VAGRANT_DIR,
-        shellPath: '/bin/zsh',
+        shellPath: '/bin/bash',
         env: {
             TERM: 'xterm-256color'
         },
@@ -1174,23 +1174,44 @@ async function restartContainer(containerName: string) {
 // Función para abrir en navegador
 async function openInBrowser(containerName: string) {
     try {
+        debugLog(`INICIO: openInBrowser para contenedor ${containerName}`);
+        
+        // Obtener la IP de la máquina virtual
+        debugLog('Obteniendo IP de la máquina virtual');
+        const vmIpCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
+        const vmIpOutput = await executeCommand(vmIpCommand);
+        const vmIp = vmIpOutput.trim();
+        
+        if (!vmIp) {
+            throw new Error('No se pudo obtener la IP de la máquina virtual');
+        }
+        
+        debugLog(`IP de la máquina virtual: ${vmIp}`);
+        
+        // Obtener el mapeo de puertos del contenedor
+        debugLog(`Obteniendo mapeo de puertos para ${containerName}`);
         const output = await executeCommand(`vagrant ssh -c "docker port ${containerName}"`);
+        
         // Buscar el primer puerto mapeado (8069/tcp -> 0.0.0.0:16832)
         const portMapping = output.match(/(\d+)\/tcp -> 0\.0\.0\.0:(\d+)/);
 
         if (portMapping && portMapping[2]) {
             const hostPort = portMapping[2]; // Puerto mapeado al host (16832)
             const internalPort = portMapping[1]; // Puerto interno (8069)
-            const url = `http://192.168.56.10:${hostPort}`;
-            vscode.env.openExternal(vscode.Uri.parse(url));
+            const url = `http://${vmIp}:${hostPort}`;
+            
             debugLog(`Abriendo URL: ${url} (puerto interno: ${internalPort})`);
+            vscode.window.showInformationMessage(`Abriendo ${containerName} en el navegador: ${url}`);
+            vscode.env.openExternal(vscode.Uri.parse(url));
         } else {
-            vscode.window.showInformationMessage('No se encontraron puertos expuestos');
             debugLog(`No se encontró mapeo de puertos para ${containerName}. Output: ${output}`);
+            vscode.window.showInformationMessage('No se encontraron puertos expuestos para este contenedor');
         }
+        
+        debugLog(`FIN: openInBrowser para contenedor ${containerName}`);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        debugLog(`Error al abrir en navegador: ${errorMessage}`);
+        debugLog(`ERROR en openInBrowser: ${errorMessage}`);
         vscode.window.showErrorMessage(`Error al abrir en navegador: ${errorMessage}`);
     }
 }
