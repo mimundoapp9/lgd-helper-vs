@@ -260,7 +260,8 @@ export function activate(context: vscode.ExtensionContext) {
                 dockerContainersProvider.refresh();
             }),
             vscode.commands.registerCommand('lgd-helper.showContainerActions',
-                (containerName: string) => showContainerActions(containerName))
+                (containerName: string) => showContainerActions(containerName)),
+            vscode.commands.registerCommand('lgd-helper.updateVmIp', updateVmIpCommand)
         ];
 
         context.subscriptions.push(...commands);
@@ -1176,28 +1177,8 @@ async function openInBrowser(containerName: string) {
     try {
         debugLog(`INICIO: openInBrowser para contenedor ${containerName}`);
         
-        // Obtener la IP de la máquina virtual que comienza con 192.168
-        debugLog('Obteniendo IP de la máquina virtual (192.168.x.x)');
-        const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
-        const vmIpOutput = await executeCommand(vmIpCommand);
-        let vmIp = vmIpOutput.trim();
-        
-        if (!vmIp) {
-            debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
-            // Fallback: intentar obtener cualquier IP si no hay una que comience con 192.168
-            const allIpsCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
-            const allIpsOutput = await executeCommand(allIpsCommand);
-            const fallbackIp = allIpsOutput.trim();
-            
-            if (!fallbackIp) {
-                throw new Error('No se pudo obtener ninguna IP de la máquina virtual');
-            }
-            
-            debugLog(`Usando IP alternativa: ${fallbackIp}`);
-            vmIp = fallbackIp;
-        }
-        
-        debugLog(`IP de la máquina virtual seleccionada: ${vmIp}`);
+        // Obtener la IP de la máquina virtual
+        const vmIp = await getVmIp();
         
         // Obtener el mapeo de puertos del contenedor
         debugLog(`Obteniendo mapeo de puertos para ${containerName}`);
@@ -1224,5 +1205,147 @@ async function openInBrowser(containerName: string) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         debugLog(`ERROR en openInBrowser: ${errorMessage}`);
         vscode.window.showErrorMessage(`Error al abrir en navegador: ${errorMessage}`);
+    }
+}
+
+// Función para iniciar la máquina virtual
+async function startVM() {
+    try {
+        // ... código existente ...
+        
+        // Actualizar la IP de la máquina virtual
+        await getVmIp(true);
+        
+        // ... resto del código ...
+    } catch (error) {
+        // ... código existente ...
+    }
+}
+
+// Función para recargar la máquina virtual
+async function reloadVM() {
+    try {
+        // ... código existente ...
+        
+        // Actualizar la IP de la máquina virtual
+        await getVmIp(true);
+        
+        // ... resto del código ...
+    } catch (error) {
+        // ... código existente ...
+    }
+}
+
+// Función para obtener la IP de la máquina virtual
+async function getVmIp(forceRefresh: boolean = false): Promise<string> {
+    try {
+        // Leer la configuración
+        const config = await readConfig();
+        
+        // Si no se solicita actualización forzada, devolver la IP de la configuración
+        if (!forceRefresh) {
+            debugLog(`Usando IP de la configuración: ${config.vmIp}`);
+            return config.vmIp;
+        }
+        
+        debugLog('Actualizando IP de la máquina virtual');
+        
+        // Intentar obtener la IP que comienza con 192.168
+        const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
+        const vmIpOutput = await executeCommand(vmIpCommand);
+        let vmIp = vmIpOutput.trim();
+        
+        if (!vmIp) {
+            debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
+            // Fallback: intentar obtener cualquier IP si no hay una que comience con 192.168
+            const allIpsCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
+            const allIpsOutput = await executeCommand(allIpsCommand);
+            vmIp = allIpsOutput.trim();
+            
+            if (!vmIp) {
+                debugLog('No se pudo obtener ninguna IP, usando valor predeterminado');
+                return config.vmIp; // Mantener el valor actual
+            }
+        }
+        
+        // Actualizar la configuración con la nueva IP
+        config.vmIp = vmIp;
+        await saveConfig(config);
+        
+        debugLog(`IP de la máquina virtual actualizada: ${vmIp}`);
+        return vmIp;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        debugLog(`ERROR al obtener IP de la máquina virtual: ${errorMessage}`);
+        
+        // En caso de error, intentar leer la configuración nuevamente
+        try {
+            const config = await readConfig();
+            return config.vmIp;
+        } catch {
+            // Si todo falla, devolver el valor predeterminado
+            return DEFAULT_VM_IP;
+        }
+    }
+}
+
+// Constantes para la configuración
+const CONFIG_FILE_NAME = 'lgd-helper-config.json';
+const DEFAULT_VM_IP = '192.168.56.10';
+
+// Función para obtener la ruta del archivo de configuración
+function getConfigFilePath(): string {
+    const workspaceFolders = vscode.workspace.workspaceFolders;
+    if (!workspaceFolders || workspaceFolders.length === 0) {
+        throw new Error('No se encontró ningún workspace abierto');
+    }
+    
+    return path.join(workspaceFolders[0].uri.fsPath, CONFIG_FILE_NAME);
+}
+
+// Función para leer la configuración
+async function readConfig(): Promise<any> {
+    try {
+        const configPath = getConfigFilePath();
+        const fs = require('fs');
+        
+        // Verificar si el archivo existe
+        if (!fs.existsSync(configPath)) {
+            // Crear archivo de configuración con valores predeterminados
+            const defaultConfig = {
+                vmIp: DEFAULT_VM_IP
+            };
+            
+            fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
+            debugLog(`Archivo de configuración creado en ${configPath} con valores predeterminados`);
+            return defaultConfig;
+        }
+        
+        // Leer el archivo de configuración
+        const configData = fs.readFileSync(configPath, 'utf8');
+        const config = JSON.parse(configData);
+        debugLog(`Configuración leída desde ${configPath}`);
+        return config;
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        debugLog(`ERROR al leer configuración: ${errorMessage}`);
+        
+        // Devolver configuración predeterminada en caso de error
+        return { vmIp: DEFAULT_VM_IP };
+    }
+}
+
+// Función para guardar la configuración
+async function saveConfig(config: any): Promise<void> {
+    try {
+        const configPath = getConfigFilePath();
+        const fs = require('fs');
+        
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+        debugLog(`Configuración guardada en ${configPath}`);
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        debugLog(`ERROR al guardar configuración: ${errorMessage}`);
+        throw new Error(`No se pudo guardar la configuración: ${errorMessage}`);
     }
 }
