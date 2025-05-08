@@ -1073,18 +1073,10 @@ async function checkVagrantStatus(): Promise<boolean> {
     const process = await executeCommand('vagrant status');
     debugLog(`Salida de vagrant status: ${process}`);
 
-    const lines = process.split('\n');
-    const statusLine = lines.find(line => line.trim().startsWith('default'));
-
-    if (statusLine) {
-      debugLog(`Línea de estado encontrada: "${statusLine}"`);
-      const isRunning = statusLine.toLowerCase().includes('running');
-      debugLog(`Estado running encontrado: ${isRunning}`);
-      return isRunning;
-    }
-
-    debugLog('No se encontró línea de estado');
-    return false;
+    // Simplemente verificar si "running" está en la salida
+    const isRunning = process.toLowerCase().includes('running');
+    debugLog(`Estado running encontrado: ${isRunning}`);
+    return isRunning;
 
   } catch (error) {
     debugLog(`Error en checkVagrantStatus: ${error}`);
@@ -1176,14 +1168,14 @@ async function restartContainer(containerName: string) {
 async function openInBrowser(containerName: string) {
     try {
         debugLog(`INICIO: openInBrowser para contenedor ${containerName}`);
-        
+
         // Obtener la IP de la máquina virtual
         const vmIp = await getVmIp();
-        
+
         // Obtener el mapeo de puertos del contenedor
         debugLog(`Obteniendo mapeo de puertos para ${containerName}`);
         const output = await executeCommand(`vagrant ssh -c "docker port ${containerName}"`);
-        
+
         // Buscar el primer puerto mapeado (8069/tcp -> 0.0.0.0:16832)
         const portMapping = output.match(/(\d+)\/tcp -> 0\.0\.0\.0:(\d+)/);
 
@@ -1191,7 +1183,7 @@ async function openInBrowser(containerName: string) {
             const hostPort = portMapping[2]; // Puerto mapeado al host (16832)
             const internalPort = portMapping[1]; // Puerto interno (8069)
             const url = `http://${vmIp}:${hostPort}`;
-            
+
             debugLog(`Abriendo URL: ${url} (puerto interno: ${internalPort})`);
             vscode.window.showInformationMessage(`Abriendo ${containerName} en el navegador: ${url}`);
             vscode.env.openExternal(vscode.Uri.parse(url));
@@ -1199,7 +1191,7 @@ async function openInBrowser(containerName: string) {
             debugLog(`No se encontró mapeo de puertos para ${containerName}. Output: ${output}`);
             vscode.window.showInformationMessage('No se encontraron puertos expuestos para este contenedor');
         }
-        
+
         debugLog(`FIN: openInBrowser para contenedor ${containerName}`);
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1212,10 +1204,10 @@ async function openInBrowser(containerName: string) {
 async function startVM() {
     try {
         // ... código existente ...
-        
+
         // Actualizar la IP de la máquina virtual
         await getVmIp(true);
-        
+
         // ... resto del código ...
     } catch (error) {
         // ... código existente ...
@@ -1226,10 +1218,10 @@ async function startVM() {
 async function reloadVM() {
     try {
         // ... código existente ...
-        
+
         // Actualizar la IP de la máquina virtual
         await getVmIp(true);
-        
+
         // ... resto del código ...
     } catch (error) {
         // ... código existente ...
@@ -1242,42 +1234,42 @@ async function getVmIp(forceRefresh: boolean = false): Promise<string> {
         // Obtener la ruta del directorio donde está el Vagrantfile
         const vagrantDir = VAGRANT_DIR;
         const ipFilePath = path.join(vagrantDir, 'ip_vm.txt');
-        
+
         debugLog(`Buscando archivo de IP en: ${ipFilePath}`);
-        
+
         // Si el archivo no existe o se solicita actualización forzada
         if (!fs.existsSync(ipFilePath) || forceRefresh) {
             debugLog('Archivo de IP no encontrado o se solicitó actualización forzada');
-            
+
             // Intentar obtener la IP que comienza con 192.168
             const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
             const vmIpOutput = await executeCommand(vmIpCommand);
             let vmIp = vmIpOutput.trim();
-            
+
             if (!vmIp) {
                 debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
                 // Fallback: intentar obtener cualquier IP si no hay una que comience con 192.168
                 const allIpsCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
                 const allIpsOutput = await executeCommand(allIpsCommand);
                 vmIp = allIpsOutput.trim();
-                
+
                 if (!vmIp) {
                     debugLog('No se pudo obtener ninguna IP, usando valor predeterminado');
                     vmIp = DEFAULT_VM_IP;
                 }
             }
-            
+
             // Guardar la IP en el archivo
             fs.writeFileSync(ipFilePath, vmIp);
             debugLog(`IP guardada en archivo: ${vmIp}`);
-            
+
             return vmIp;
         }
-        
+
         // Leer la IP desde el archivo
         const vmIp = fs.readFileSync(ipFilePath, 'utf8').trim();
         debugLog(`IP leída desde archivo: ${vmIp}`);
-        
+
         return vmIp;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -1296,7 +1288,7 @@ function getConfigFilePath(): string {
     if (!workspaceFolders || workspaceFolders.length === 0) {
         throw new Error('No se encontró ningún workspace abierto');
     }
-    
+
     return path.join(workspaceFolders[0].uri.fsPath, CONFIG_FILE_NAME);
 }
 
@@ -1305,19 +1297,19 @@ async function readConfig(): Promise<any> {
     try {
         const configPath = getConfigFilePath();
         const fs = require('fs');
-        
+
         // Verificar si el archivo existe
         if (!fs.existsSync(configPath)) {
             // Crear archivo de configuración con valores predeterminados
             const defaultConfig = {
                 vmIp: DEFAULT_VM_IP
             };
-            
+
             fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 2));
             debugLog(`Archivo de configuración creado en ${configPath} con valores predeterminados`);
             return defaultConfig;
         }
-        
+
         // Leer el archivo de configuración
         const configData = fs.readFileSync(configPath, 'utf8');
         const config = JSON.parse(configData);
@@ -1326,7 +1318,7 @@ async function readConfig(): Promise<any> {
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         debugLog(`ERROR al leer configuración: ${errorMessage}`);
-        
+
         // Devolver configuración predeterminada en caso de error
         return { vmIp: DEFAULT_VM_IP };
     }
@@ -1337,7 +1329,7 @@ async function saveConfig(config: any): Promise<void> {
     try {
         const configPath = getConfigFilePath();
         const fs = require('fs');
-        
+
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
         debugLog(`Configuración guardada en ${configPath}`);
     } catch (error) {
@@ -1346,4 +1338,3 @@ async function saveConfig(config: any): Promise<void> {
         throw new Error(`No se pudo guardar la configuración: ${errorMessage}`);
     }
 }
-  
