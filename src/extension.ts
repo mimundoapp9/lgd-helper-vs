@@ -1239,53 +1239,50 @@ async function reloadVM() {
 // Función para obtener la IP de la máquina virtual
 async function getVmIp(forceRefresh: boolean = false): Promise<string> {
     try {
-        // Leer la configuración
-        const config = await readConfig();
+        // Obtener la ruta del directorio donde está el Vagrantfile
+        const vagrantDir = VAGRANT_DIR;
+        const ipFilePath = path.join(vagrantDir, 'ip_vm.txt');
         
-        // Si no se solicita actualización forzada, devolver la IP de la configuración
-        if (!forceRefresh) {
-            debugLog(`Usando IP de la configuración: ${config.vmIp}`);
-            return config.vmIp;
-        }
+        debugLog(`Buscando archivo de IP en: ${ipFilePath}`);
         
-        debugLog('Actualizando IP de la máquina virtual');
-        
-        // Intentar obtener la IP que comienza con 192.168
-        const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
-        const vmIpOutput = await executeCommand(vmIpCommand);
-        let vmIp = vmIpOutput.trim();
-        
-        if (!vmIp) {
-            debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
-            // Fallback: intentar obtener cualquier IP si no hay una que comience con 192.168
-            const allIpsCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
-            const allIpsOutput = await executeCommand(allIpsCommand);
-            vmIp = allIpsOutput.trim();
+        // Si el archivo no existe o se solicita actualización forzada
+        if (!fs.existsSync(ipFilePath) || forceRefresh) {
+            debugLog('Archivo de IP no encontrado o se solicitó actualización forzada');
+            
+            // Intentar obtener la IP que comienza con 192.168
+            const vmIpCommand = `vagrant ssh -c "hostname -I | tr ' ' '\n' | grep '^192\\.168' | head -1"`;
+            const vmIpOutput = await executeCommand(vmIpCommand);
+            let vmIp = vmIpOutput.trim();
             
             if (!vmIp) {
-                debugLog('No se pudo obtener ninguna IP, usando valor predeterminado');
-                return config.vmIp; // Mantener el valor actual
+                debugLog('No se encontró IP que comience con 192.168, intentando obtener cualquier IP');
+                // Fallback: intentar obtener cualquier IP si no hay una que comience con 192.168
+                const allIpsCommand = `vagrant ssh -c "hostname -I | awk '{print \\$1}'"`;
+                const allIpsOutput = await executeCommand(allIpsCommand);
+                vmIp = allIpsOutput.trim();
+                
+                if (!vmIp) {
+                    debugLog('No se pudo obtener ninguna IP, usando valor predeterminado');
+                    vmIp = DEFAULT_VM_IP;
+                }
             }
+            
+            // Guardar la IP en el archivo
+            fs.writeFileSync(ipFilePath, vmIp);
+            debugLog(`IP guardada en archivo: ${vmIp}`);
+            
+            return vmIp;
         }
         
-        // Actualizar la configuración con la nueva IP
-        config.vmIp = vmIp;
-        await saveConfig(config);
+        // Leer la IP desde el archivo
+        const vmIp = fs.readFileSync(ipFilePath, 'utf8').trim();
+        debugLog(`IP leída desde archivo: ${vmIp}`);
         
-        debugLog(`IP de la máquina virtual actualizada: ${vmIp}`);
         return vmIp;
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
         debugLog(`ERROR al obtener IP de la máquina virtual: ${errorMessage}`);
-        
-        // En caso de error, intentar leer la configuración nuevamente
-        try {
-            const config = await readConfig();
-            return config.vmIp;
-        } catch {
-            // Si todo falla, devolver el valor predeterminado
-            return DEFAULT_VM_IP;
-        }
+        return DEFAULT_VM_IP;
     }
 }
 
@@ -1349,3 +1346,4 @@ async function saveConfig(config: any): Promise<void> {
         throw new Error(`No se pudo guardar la configuración: ${errorMessage}`);
     }
 }
+  
